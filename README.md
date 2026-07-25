@@ -35,8 +35,8 @@ belongs to a later phase:
 
 | Path | Contents |
 | --- | --- |
-| `apps/api` | Express + TypeScript API, Prisma schema and migrations, seeds |
-| `apps/web` | Vite + React SPA, TanStack Query, Tailwind |
+| `apps/server` | Express + TypeScript API, Prisma schema and migrations, seeds |
+| `apps/client` | Vite + React SPA, TanStack Query, Tailwind |
 | `packages/shared` | Domain enums and API contract types shared by both |
 
 ## Getting started
@@ -46,15 +46,26 @@ or a local install exposing the same URL).
 
 ```bash
 pnpm install
-cp apps/api/.env.example apps/api/.env   # edit the bootstrap admin credentials
-pnpm db:migrate                          # apply migrations
-pnpm db:seed                             # bootstrap admin, agents, ticket fixtures
-pnpm dev                                 # API on :3000, SPA on :5173
+cp apps/server/.env.example apps/server/.env  # edit the bootstrap admin credentials
+pnpm db:migrate                               # apply migrations
+pnpm db:seed                                  # bootstrap admin, agents, ticket fixtures
+pnpm dev                                      # server on :3000, client on :5173
 ```
 
 The SPA proxies `/api/*` to the API in development, mirroring the production
 topology where CloudFront serves both from one origin — that is what keeps
 session cookies `SameSite=Lax` with no CORS.
+
+## Exploring the API
+
+With `pnpm dev` running, **http://localhost:5173/api/docs** serves Swagger UI
+over the seeded data — read endpoints for the ticket queue, ticket detail,
+users, and aggregate stats. The OpenAPI document is generated from the same Zod
+schemas the server validates against, so it cannot drift from the code.
+
+It is **disabled in production** (`ENABLE_API_DOCS`), and these endpoints are
+unauthenticated only because Phase 2 has not shipped; they move behind
+`requireAuth` when it does.
 
 | Command | Does |
 | --- | --- |

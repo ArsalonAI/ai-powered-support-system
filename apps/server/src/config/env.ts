@@ -13,6 +13,15 @@ const envSchema = z.object({
   /** Reported by `/api/health`, so a deploy can be verified as having landed. */
   APP_VERSION: z.string().default('0.1.0'),
 
+  /**
+   * Serves Swagger UI at `/api/docs` and the raw spec at `/api/openapi.json`.
+   *
+   * Defaults on outside production and off in production: an interactive
+   * console over customer data is precisely what the PRD's no-public-routes
+   * rule exists to prevent, so enabling it in production has to be deliberate.
+   */
+  ENABLE_API_DOCS: z.enum(['true', 'false']).optional(),
+
   DATABASE_URL: z.string().url(),
 
   /**
@@ -77,3 +86,11 @@ export const env: Env = loadEnv();
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
+
+/**
+ * Unset means "on everywhere except production". Setting it explicitly wins in
+ * both directions, so exposing the docs in production is possible but never
+ * accidental.
+ */
+export const apiDocsEnabled =
+  env.ENABLE_API_DOCS === undefined ? !isProduction : env.ENABLE_API_DOCS === 'true';
