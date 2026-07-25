@@ -169,10 +169,25 @@ Prisma against Postgres.
 A `Job` table plus a worker polling with `FOR UPDATE SKIP LOCKED`. No pg-boss,
 no Redis, no BullMQ.
 
-At this volume, and with no scheduled-send semantics to get right, a job library
-would add a second schema for Prisma Migrate to fight with in exchange for
-features we don't use. Jobs are best-effort with a retry count; if one is lost,
-the ticket is still visible and workable without its AI draft.
+At under 50 tickets/day (see the PRD's non-functional requirements), and with no
+scheduled-send semantics to get right, a job library would add a second schema
+for Prisma Migrate to fight with in exchange for features we don't use. Jobs are
+best-effort with a retry count; if one is lost, the ticket is still visible and
+workable without its AI draft.
+
+### Local substitutes
+
+Two AWS services have local stand-ins so that no build phase is blocked on
+deployed infrastructure:
+
+| Service | Local | Used by |
+|---|---|---|
+| S3 | MinIO in `docker-compose`, or a filesystem driver | Attachments |
+| EventBridge | A plain interval in the worker | Auto-resolve / auto-close sweeps |
+
+Attachments go through a small storage interface (`put` / `get` / `signedUrl`)
+rather than the AWS SDK directly, so the driver swaps at deploy time without
+touching call sites.
 
 ## Email
 
@@ -220,8 +235,9 @@ sent by a human anyway.
 Gmail API send, with `threadId` set so replies land in the customer's existing
 conversation rather than starting a new one.
 
-- Watch the **~2,000 sends/day** Workspace quota. Confirm it clears your
-  expected volume with headroom.
+- The **~2,000 sends/day** Workspace quota clears expected volume by more than
+  10× (under 50 tickets/day, ~150 at peak). Still alarm on 429s — the quota is
+  per account, not per application, and other Workspace usage counts against it.
 - Handle 429s with backoff; surface persistent send failures to the agent
   rather than silently retrying forever.
 

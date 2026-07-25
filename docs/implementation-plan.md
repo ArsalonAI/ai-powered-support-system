@@ -5,16 +5,16 @@ See [prd.md](./prd.md) for scope and [tech-stack.md](./tech-stack.md) for stack 
 
 ## Phases
 
-| # | Phase | Delivers |
-|---|---|---|
-| 1 | Project setup | Scaffolding, database, Prisma schema, admin seed |
-| 2 | Authentication | Login, sessions, route protection |
-| 3 | Ticket CRUD | Core ticket operations, list/detail with filtering |
-| 4 | User management | Admin CRUD for agents, role-based access |
-| 5 | AI features | Claude integration: classification, summaries, suggested replies |
-| 6 | Email integration | Gmail polling → tickets, outbound replies |
-| 7 | Dashboard | Stats overview, category breakdown |
-| 8 | Polish & deployment | Validation, error handling, Docker |
+| # | Phase | Delivers | Size |
+|---|---|---|---|
+| 1 | Project setup | Scaffolding, database, Prisma schema, admin seed | 7S · 11M |
+| 2 | Authentication | Login, sessions, route protection | 4S · 8M |
+| 3 | Ticket CRUD | Core ticket operations, list/detail with filtering | 3S · 10M · 2L |
+| 4 | User management | Admin CRUD for agents, role-based access | 2S · 6M |
+| 5 | AI features | Claude integration: classification, summaries, suggested replies | 3S · 12M · 3L |
+| 6 | Email integration | Gmail polling → tickets, outbound replies | 1S · 12M |
+| 7 | Dashboard | Stats overview, category breakdown | 5M · 1L |
+| 8 | Polish & deployment | Validation, error handling, Docker | 14M · 3L |
 
 The build works inside-out: the domain model and AI are developed against seeded
 tickets, and email is connected last. Two consequences to plan around:
@@ -27,11 +27,20 @@ tickets, and email is connected last. Two consequences to plan around:
   nothing to point at unless Phase 1 seeds more than one account.
 
 Because email is polled rather than pushed, **no phase is blocked on deployed
-infrastructure**. Everything, email included, runs locally against Postgres in
-Docker and a real Gmail mailbox. Deployment can safely stay in Phase 8.
+infrastructure** — provided two AWS services have local substitutes:
+
+| AWS service | Local substitute | Swapped in at |
+|---|---|---|
+| S3 (attachments, 6.7) | MinIO in `docker-compose`, or a filesystem adapter behind the same interface | 8.6 |
+| EventBridge (sweeps, 3.8) | A plain interval in the worker process | 8.11 |
+
+Task **1.18** builds the storage abstraction so 6.7 does not hard-code the AWS
+SDK. Everything else, email included, runs against `docker-compose up` and a
+real Gmail mailbox with no AWS account.
 
 Sizes are relative (S ≈ hours, M ≈ a day or two, L ≈ several days). They are
-sequencing aids, not estimates — no team size or calendar was specified.
+sequencing aids, not estimates — no calendar was specified. Phase totals are
+task counts by size, not durations.
 
 ---
 
@@ -44,11 +53,16 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 | P.1 | **Confirm the support inbox is a real mailbox, not a Google Group** | S |
 | P.2 | Google Cloud project; enable the Gmail API | S |
 | P.3 | OAuth client; consent once as the shared mailbox; capture the refresh token | S |
-| P.4 | Confirm expected send volume clears the ~2,000/day Workspace quota | S |
+| P.4 | ✅ Send volume confirmed — under 50 tickets/day against a ~2,000/day quota | S |
+| P.5 | **Decide the data retention and PII policy** — a decision, not code; gates 8.16 | M |
 
 > P.1 is the one that bites. Google Groups do not expose the same API surface,
 > and discovering that in Phase 6 means renegotiating which address support
 > uses — after customers already have it.
+>
+> P.5 is here because 8.16 implements a policy that does not yet exist. Deciding
+> it late means either a rushed decision or a blocked launch task; deciding it
+> now costs a conversation.
 
 ---
 
@@ -91,6 +105,7 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 | 1.15 | Force password change on first login | S |
 | 1.16 | **Seed a handful of agent users** — assignment and attribution need them before Phase 4 | S |
 | 1.17 | Ticket seed fixtures — realistic bodies across all three categories | M |
+| 1.18 | **Storage abstraction** (`put`/`get`/`signedUrl`) with a local filesystem or MinIO driver, S3 driver added at 8.6 | M |
 
 > There is no self-service signup, so without 1.14 the first deploy locks you
 > out of your own system. And 1.17 is not throwaway scaffolding — it is what
@@ -117,10 +132,12 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 | 2.9 | CSRF tokens on state-changing requests | M |
 | 2.10 | `requireAuth` / `requireAdmin` middleware | S |
 | 2.11 | Login UI, session-aware routing, global 401 handling | M |
+| 2.12 | **Auth integration tests**: session regeneration on login, revocation on deactivation, rate-limit backoff, no user enumeration by timing | M |
 
 > 2.4, 2.6, and 2.7 each look like details and each is a real vulnerability if
 > skipped: session fixation, un-revocable access, and account enumeration by
-> response timing.
+> response timing. 2.12 exists because all three fail *silently* — the app works
+> perfectly with every one of them broken.
 
 **Exit criteria:** every route except `/api/health` requires a session.
 
@@ -153,6 +170,7 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 | 3.12 | Default view: `open AND waiting_on = us`, oldest first | S |
 | 3.13 | Ticket detail: thread view, customer context, metadata sidebar | L |
 | 3.14 | Reply composer (persists a message; sending arrives in Phase 6) | M |
+| 3.15 | **State-machine tests** for the transition service: every legal transition, and rejection of every illegal one | M |
 
 > `waiting_on` is what makes the list usable. Without it every live ticket looks
 > identical and the queue stops telling anyone what to work on — see the PRD.
@@ -160,6 +178,15 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 > Assignment (3.6) and the assignee filter (3.10) are only testable against the
 > seeded agent users from 1.16. With a single admin account they look like they
 > work and prove nothing.
+>
+> 3.15 covers the single most test-worthy unit in the system. The lifecycle has
+> reopen paths, a terminal state, two timed sweeps, and cross-linking — the kind
+> of logic that stays correct only if illegal transitions are asserted against,
+> not just legal ones.
+>
+> Sweeps (3.8) run on a plain interval in the worker for now; EventBridge
+> replaces it at 8.11. Keep the sweep logic in a function the scheduler calls,
+> not in the scheduler.
 
 **Exit criteria:** an agent can triage, work, and resolve a seeded ticket end to end.
 
@@ -232,13 +259,20 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 | 5.12 | **Grounding gate** — no supporting KB content → withhold the draft, flag for research | M |
 | 5.13 | Prompt-injection delimiting of the customer email body | M |
 | 5.14 | Draft UI: show, edit, use, discard; cite source KB documents | L |
-| 5.15 | **Record AI-drafted / edited-before-send on every message** | M |
+| 5.15 | **Postgres: AI-drafted / edited-before-send flags on every message** — the durable record the dashboard queries | M |
 | 5.16 | Spans per Anthropic call: model, effort, tokens, cache reads, latency | M |
-| 5.17 | **Metrics: draft accepted / edited / rejected** | M |
+| 5.17 | **OTel metrics: draft accepted / edited / rejected** — the ops view, for alerting | M |
+| 5.18 | **Classification eval** over the 1.17 seed corpus; assert ≥85% against labeled fixtures | M |
 
-> 5.15 and 5.17 ship with the first draft, not later. Acceptance rate is the
-> primary success measure for the product and — unlike latency or error rate —
-> there is no log to reconstruct it from after the fact.
+> 5.15 and 5.17 are deliberately separate and both required. **5.15 is the
+> source of truth** — flags on the message row in Postgres, which is what the
+> Phase 7 dashboard queries. **5.17 is telemetry** — OTel metrics landing in
+> CloudWatch, for alerting. The SPA cannot query CloudWatch, so building only
+> 5.17 leaves 7.4 with nothing to render.
+>
+> Both ship with the first draft, not later. Acceptance rate is the primary
+> success measure for the product and — unlike latency or error rate — there is
+> no log to reconstruct it from after the fact.
 
 **Exit criteria:** a seeded ticket gets a category, a summary, and a cited draft; acceptance is measurable.
 
@@ -271,11 +305,17 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 | 6.10 | Switch invites and password resets to emailed links | S |
 | 6.11 | Quota and 429 handling; surface persistent send failures to the agent | M |
 | 6.12 | **Dead-man's switch: no inbound email polled in N hours** | M |
+| 6.13 | **Fixture-driven tests**: `historyId` expiry → resync, re-poll is idempotent, auto-responder headers create no ticket | M |
 
 > Threading is `threadId` — one field, no header parsing, no per-mail-client
 > edge cases. The real risks in this phase are quieter: an unhandled
 > `historyId` expiry (6.3) silently stops ingestion, and a missing idempotency
-> key (6.5) duplicates tickets on retry. Both fail without an error.
+> key (6.5) duplicates tickets on retry. Both fail without an error, which is
+> exactly why 6.13 tests them against fixtures rather than waiting to observe
+> them in production.
+>
+> Attachments (6.7) go through the 1.18 storage abstraction, not the AWS SDK
+> directly — locally that is MinIO or the filesystem driver.
 
 **Exit criteria:** mail to the support address becomes a threaded ticket; replies land in the customer's existing conversation.
 
@@ -290,7 +330,7 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 | 7.1 | Aggregate queries: volume, backlog, response time, resolution time | M |
 | 7.2 | Category breakdown over time | M |
 | 7.3 | Dashboard UI with date-range selection | L |
-| 7.4 | AI adoption panel: acceptance rate, edit rate, drafts withheld for grounding | M |
+| 7.4 | AI adoption panel: acceptance rate, edit rate, drafts withheld — queried from the **5.15 Postgres flags**, not CloudWatch | M |
 | 7.5 | Audit log viewer (admin only) | M |
 | 7.6 | Index review — dashboard aggregates are the queries most likely to go slow | M |
 
@@ -336,19 +376,25 @@ No DNS, no MX, no waiting on propagation. Roughly half an hour.
 | 8.13 | Load test; tune Prisma `connection_limit` against RDS `max_connections` | M |
 | 8.14 | Backup and restore rehearsal (an untested restore is not a backup) | M |
 | 8.15 | Runbook: polling stalled, refresh token revoked, Anthropic down, bad drafts | M |
-| 8.16 | Data retention and PII policy, implemented | L |
+| 8.16 | Implement the retention and PII policy decided at **P.5** | M |
 | 8.17 | Agent onboarding docs and training | M |
+
+**Exit criteria:** the system runs in AWS from a tagged commit; a restore has
+been rehearsed; the dead-man's switch has been proven to fire; and an agent who
+did not build it can work a real ticket end to end from the runbook.
 
 ---
 
 ## Critical path
 
 ```
-P.1–P.4 Gmail setup ────────────────────────────────────────┐
-                                                            ▼
-1.8–1.13 schema ──► 2.x auth ──► 3.x tickets ──► 4.x users ──► 5.x AI ──► 6.x email ──► 7.x dashboard ──► 8.x deploy
-                                                                  │                          ▲
-                                                              5.1 jobs ──────────────────────┘
+P.1–P.4 Gmail setup ──────────────────────────────────┐
+P.5 retention policy ─────────────────────────────────┼──────────────┐
+                                                      ▼              ▼
+1.x setup ──► 2.x auth ──► 3.x tickets ──► 4.x users ──► 5.x AI ──► 6.x email ──► 7.x dashboard ──► 8.x deploy
+                                                          │
+                                                     5.1 job queue
+                                                    (used by 5.x and 6.x)
 ```
 
 Strictly serial. No phase waits on infrastructure, DNS, or a third-party
@@ -374,7 +420,9 @@ available.
 | Prompt cache silently missing | Cost multiple, not an error | Assert `cache_read_input_tokens > 0` (5.6) |
 | Adoption metric added late | Success is unmeasurable | 5.15 / 5.17 ship with the first draft |
 | Weak seed fixtures | Phases 3 and 5 built on unrealistic data | Invest in 1.17 early; it doubles as the AI eval set |
-| Send volume exceeds Gmail quota | Replies fail at ~2,000/day | Check at P.4; alarm on 429s |
+| Untested lifecycle transitions | Illegal state changes ship unnoticed | State-machine tests at 3.15 |
+| AWS SDK hard-coded for attachments | Phase 6 becomes infra-blocked | Storage abstraction at 1.18; MinIO locally |
+| ~~Send volume exceeds Gmail quota~~ | Resolved — under 50/day against ~2,000/day | Still alarm on 429s (6.11) |
 
 ## Explicitly not in scope
 
