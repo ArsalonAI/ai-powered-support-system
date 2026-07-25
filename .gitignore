@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+# Local storage driver root (attachments) — see packages storage abstraction
+.storage/
+
+# Machine-local Claude Code settings. The agent definitions in .claude/agents
+# are shared and stay tracked.
+.claude/settings.local.json
+
+.DS_Store
+*.log
+.vite/
+.turbo/

@@ -17,8 +17,50 @@ Built for a small in-house support team (1–3 agents, under 50 tickets/day).
 
 ## Status
 
-Specification complete; implementation not yet started. Start at
-[Phase 1](docs/implementation-plan.md#phase-1--project-setup).
+**Phase 1 complete** — scaffolding, schema, and seed data. The app boots, the
+full schema is migrated, and a realistic ticket corpus is seeded. Next is
+[Phase 2 — Authentication](docs/implementation-plan.md#phase-2--authentication);
+until it lands there is no login and no route protection.
+
+Two Phase 1 items are deliberately only half-landed, because their other half
+belongs to a later phase:
+
+- **Forced password change (1.15)** exists as the `mustChangePassword` column
+  and is set by the bootstrap seed. Nothing enforces it until Phase 2 builds
+  the login flow.
+- **argon2id hashing (2.1)** shipped early, because the bootstrap admin seed
+  cannot hash a password without it.
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `apps/api` | Express + TypeScript API, Prisma schema and migrations, seeds |
+| `apps/web` | Vite + React SPA, TanStack Query, Tailwind |
+| `packages/shared` | Domain enums and API contract types shared by both |
+
+## Getting started
+
+Requires Node 22+, pnpm, and Postgres 17 (via `docker compose up -d postgres`,
+or a local install exposing the same URL).
+
+```bash
+pnpm install
+cp apps/api/.env.example apps/api/.env   # edit the bootstrap admin credentials
+pnpm db:migrate                          # apply migrations
+pnpm db:seed                             # bootstrap admin, agents, ticket fixtures
+pnpm dev                                 # API on :3000, SPA on :5173
+```
+
+The SPA proxies `/api/*` to the API in development, mirroring the production
+topology where CloudFront serves both from one origin — that is what keeps
+session cookies `SameSite=Lax` with no CORS.
+
+| Command | Does |
+| --- | --- |
+| `pnpm typecheck` / `pnpm lint` / `pnpm test` / `pnpm build` | What CI runs, in that order |
+| `pnpm db:migrate:deploy` | The one-off migration task; what deploys run |
+| `pnpm db:reset` | Drop, re-migrate, and re-seed |
 
 ## License
 
