@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process';
 
 const url =
-  process.env.TEST_DATABASE_URL ?? 'postgres://support:support@localhost:5432/support_test';
+  process.env.TEST_DATABASE_URL ?? 'postgres://support:support@localhost:5432/helpdesk_test';
 
 if (!/test/i.test(url)) {
   console.error(`Refusing to prepare a test database whose URL does not look like one: ${url}`);

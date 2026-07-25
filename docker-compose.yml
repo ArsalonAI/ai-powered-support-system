@@ -6,20 +6,20 @@ services:
     environment:
       POSTGRES_USER: support
       POSTGRES_PASSWORD: support
-      POSTGRES_DB: support_dev
+      POSTGRES_DB: helpdesk
     ports:
       - '5432:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+      - ./apps/server/scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U support -d support_dev']
+      test: ['CMD-SHELL', 'pg_isready -U support -d helpdesk']
       interval: 5s
       timeout: 5s
       retries: 10
 
   # Local stand-in for S3 (attachments). The storage abstraction in
-  # apps/api/src/storage keeps call sites identical across drivers, so this is
+  # apps/server/src/storage keeps call sites identical across drivers, so this is
   # optional until Phase 6 — the filesystem driver is the default locally.
   minio:
     image: minio/minio:latest

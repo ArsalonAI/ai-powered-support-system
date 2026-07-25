@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 
-// Same .env the dev server and the Prisma CLI read (cwd is apps/api).
+// Same .env the dev server and the Prisma CLI read (cwd is apps/server).
 if (existsSync('.env')) {
   process.loadEnvFile('.env');
 }

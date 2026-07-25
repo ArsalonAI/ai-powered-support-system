@@ -14,7 +14,7 @@ datasource db {
 // ---------------------------------------------------------------------------
 // Enums — the state machine belongs in the schema.
 // Mirrored in packages/shared/src/domain.ts, asserted equal at compile time by
-// apps/api/src/domain/enums.ts.
+// apps/server/src/domain/enums.ts.
 // ---------------------------------------------------------------------------
 
 enum Role {

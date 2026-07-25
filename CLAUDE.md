@@ -36,22 +36,22 @@ Postgres comes from `docker compose up -d postgres` (or any local install
 exposing the same URL). First run:
 
 ```bash
-pnpm install                             # builds packages/shared via its prepare script
-cp apps/api/.env.example apps/api/.env   # then edit the bootstrap admin credentials
+pnpm install                                  # builds packages/shared via its prepare script
+cp apps/server/.env.example apps/server/.env  # then edit the bootstrap admin credentials
 pnpm db:migrate && pnpm db:seed
-pnpm dev                                 # API :3000, SPA :5173
+pnpm dev                                      # server :3000, client :5173
 ```
 
 | Command | Notes |
 | --- | --- |
 | `pnpm typecheck` \| `lint` \| `format:check` \| `test` \| `build` | Exactly what CI runs, in that order |
-| `pnpm --filter @support/api test` | Migrates the test database first, then runs Vitest |
-| `pnpm --filter @support/api exec vitest run src/auth/password.test.ts` | One file — skips the test-DB migration, so run the line above at least once first |
-| `pnpm --filter @support/api exec vitest run -t 'rejects the wrong password'` | One test by name |
+| `pnpm --filter @support/server test` | Migrates the test database first, then runs Vitest |
+| `pnpm --filter @support/server exec vitest run src/auth/password.test.ts` | One file — skips the test-DB migration, so run the line above at least once first |
+| `pnpm --filter @support/server exec vitest run -t 'rejects the wrong password'` | One test by name |
 | `pnpm db:reset` | Drop, re-migrate, re-seed |
 | `pnpm db:migrate:deploy` | The one-off migration task; what deploys run |
 
-`apps/api` and `apps/web` import `@support/shared` through its **built** `dist/`,
+`apps/server` and `apps/client` import `@support/shared` through its **built** `dist/`,
 which is gitignored. If either fails with `TS2307: Cannot find module
 '@support/shared'`, run `pnpm --filter @support/shared build`.
 
@@ -69,7 +69,7 @@ keeps session cookies `SameSite=Lax` with no CORS. Do not introduce a
 cross-origin API URL.
 
 **`packages/shared` is the wire contract** — domain enums and API response
-shapes used by both sides. `apps/api/src/domain/enums.ts` holds compile-time
+shapes used by both sides. `apps/server/src/domain/enums.ts` holds compile-time
 assertions that the Prisma enums and the shared enums are identical; if it fails
 to typecheck, the two have drifted and one of them is wrong.
 
@@ -83,7 +83,7 @@ session auth from Phase 2 onward.
 
 ## Invariants enforced by the database
 
-`apps/api/prisma/migrations/*/migration.sql` carries CHECK constraints and
+`apps/server/prisma/migrations/*/migration.sql` carries CHECK constraints and
 `ON DELETE RESTRICT` foreign keys that the Prisma schema language cannot
 express. They exist because the application is not the only writer — seeds,
 scripts, and a `psql` session all bypass it — and because each of these fails
@@ -118,21 +118,21 @@ scripts, and a `psql` session all bypass it — and because each of these fails
   knowledge base coverage, not AI quality.
 - **Gmail idempotency** is the Gmail message ID, enforced by a unique index —
   not by a read-then-write check.
-- **Attachments go through the storage abstraction** (`apps/api/src/storage`),
+- **Attachments go through the storage abstraction** (`apps/server/src/storage`),
   never the AWS SDK directly. The driver is constructed at boot so a
   misconfigured one crashes the deploy rather than the first attachment.
 
 ## Conventions worth knowing
 
-- **`.env` lives at `apps/api/.env`** so the Prisma CLI and `node --env-file`
+- **`.env` lives at `apps/server/.env`** so the Prisma CLI and `node --env-file`
   read the same file. The environment is parsed once at boot through Zod and the
   process exits if it does not validate.
-- **Tests run against `support_test`**, truncating between files. Never point
+- **Tests run against `helpdesk_test`**, truncating between files. Never point
   `TEST_DATABASE_URL` at the dev database.
 - **Migrations run as a one-off task before deploy**, never on container start —
   concurrent tasks would race.
 - **Seed fixtures are production-grade code, not scaffolding.**
-  `apps/api/prisma/seeds/ticket-fixtures.ts` is both the development corpus and
+  `apps/server/prisma/seeds/ticket-fixtures.ts` is both the development corpus and
   the Phase 5 classification eval set. Its assertions encode real requirements
   (corpus size for a stable accuracy gate, queue depth for pagination, labeled
   ambiguous cases). Adding fixtures is normal; weakening those assertions is not.
@@ -141,6 +141,32 @@ scripts, and a `psql` session all bypass it — and because each of these fails
 - Model the whole schema up front, including tables whose phases are months out.
   Retrofitting a column onto a live table is a data migration; adding it to the
   initial migration is free.
+
+## Looking up library documentation
+
+**Use the `context7` MCP server to fetch current docs before writing code against
+a library** — `resolve-library-id` to find the library, then `query-docs`. Do
+this even when you are confident, and especially for configuration, setup, and
+migration questions.
+
+This is not generic caution. Nearly every dependency here is on a major version
+that broke its predecessor's API, and the wrong-version answer usually *looks*
+right:
+
+| | Where memory tends to be stale |
+| --- | --- |
+| Express 5 | async error propagation, removed path-matching syntax |
+| Prisma 6 | `prisma.config.ts` replacing `package.json#prisma`, client generation output |
+| React 19 + React Router 7 | the `react-router` package replacing `react-router-dom` |
+| Tailwind 4 | CSS-first config, `@theme`, the Vite plugin — no `tailwind.config.js` |
+| Zod 3 | v4 moved and renamed enough API that v4 answers fail to compile here |
+| Vitest 3 / TanStack Query 5 | config surface and option names |
+
+Do not use it for refactoring, business-logic debugging, or general programming
+questions — it answers "what is this library's current API", nothing else.
+
+**Anthropic and Claude questions go to the `claude-api` skill instead**, not
+context7 — model IDs, pricing, `effort`, caching, and SDK usage all live there.
 
 ## Reviewing
 
