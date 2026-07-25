@@ -8,11 +8,12 @@ on:
     branches: ['**']
   pull_request:
 
-# Keyed on the head branch so a push run and a pull_request run for the same
-# branch share one group and the newer cancels the older, rather than both
-# running every time.
+# Keyed on the bare branch name so a push run and a pull_request run for the
+# same branch share one group and the newer cancels the older, rather than both
+# running every time. `ref_name` rather than `ref` matters: on push the latter
+# is `refs/heads/x`, which would never match the `x` that `head_ref` gives.
 concurrency:
-  group: ci-${{ github.head_ref || github.ref }}
+  group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
