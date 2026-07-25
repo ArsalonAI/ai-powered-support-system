@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+pnpm-lock.yaml
+apps/api/prisma/migrations
+
+# Authored prose, not generated code. Prettier reflows markdown tables and
+# wrapping in ways that make spec diffs unreadable.
+docs
+README.md
+.claude

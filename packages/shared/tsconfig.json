@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // Platform-agnostic on purpose: this package is imported by both the API
+    // and the browser bundle, so it must not depend on Node globals.
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}
