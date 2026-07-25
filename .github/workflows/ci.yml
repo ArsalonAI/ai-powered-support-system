@@ -1,12 +1,18 @@
 name: CI
 
 on:
+  # Every branch, not just main: a branch without an open pull request would
+  # otherwise get no CI at all, which is how three commits once landed here
+  # unverified.
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
 
+# Keyed on the head branch so a push run and a pull_request run for the same
+# branch share one group and the newer cancels the older, rather than both
+# running every time.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 env:
