@@ -107,6 +107,58 @@ export const ticketDetailSchema = ticketSummarySchema.extend({
 });
 export type TicketDetail = z.infer<typeof ticketDetailSchema>;
 
+/**
+ * Write requests (Phase 2).
+ *
+ * Everything here ends up in the transition service, never in a raw update, so
+ * these shapes describe *intents* — resolve, reply, claim — rather than a
+ * patch of ticket columns. There is deliberately no schema that lets a caller
+ * set `status` directly.
+ */
+
+export const ticketCategorySchema = z.enum([
+  'TECHNICAL_QUESTION',
+  'REFUND_REQUEST',
+  'GENERAL_QUESTION',
+]);
+
+/**
+ * The AI adoption flags are required, not defaulted, and the pairing is checked
+ * rather than assumed. Acceptance rate is the primary success metric and cannot
+ * be reconstructed later, so a send path that forgets to say whether a reply
+ * began as a draft must fail rather than record a false negative.
+ */
+export const replyRequestSchema = z
+  .object({
+    bodyText: z.string().min(1, 'A reply cannot be empty'),
+    subject: z.string().nullish(),
+    aiDrafted: z.boolean(),
+    aiDraftEdited: z.boolean().nullish(),
+  })
+  .refine((body) => !(body.aiDrafted && body.aiDraftEdited === undefined), {
+    path: ['aiDraftEdited'],
+    message: 'Required when aiDrafted is true',
+  })
+  .refine((body) => !(!body.aiDrafted && body.aiDraftEdited != null), {
+    path: ['aiDraftEdited'],
+    message: 'Must be omitted when aiDrafted is false',
+  });
+export type ReplyRequest = z.infer<typeof replyRequestSchema>;
+
+export const closeRequestSchema = z.object({
+  /** Free text — "spam", "duplicate of #12". Recorded on the audit event. */
+  reason: z.string().max(500).optional(),
+});
+
+export const assigneeRequestSchema = z.object({
+  /** Null unclaims. Claiming never restricts anyone else from acting. */
+  assigneeId: z.string().uuid().nullable(),
+});
+
+export const categoryRequestSchema = z.object({
+  category: ticketCategorySchema,
+});
+
 export const pageInfoSchema = z.object({
   page: z.number().int(),
   pageSize: z.number().int(),

@@ -31,3 +31,16 @@ export function parseParams<T>(schema: ZodType<T>, req: Request): T {
   }
   return result.data;
 }
+
+export function parseBody<T>(schema: ZodType<T>, req: Request): T {
+  const result = schema.safeParse(req.body);
+  if (!result.success) {
+    throw new ApiError('VALIDATION_FAILED', 'Invalid request body', {
+      issues: result.error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    });
+  }
+  return result.data;
+}

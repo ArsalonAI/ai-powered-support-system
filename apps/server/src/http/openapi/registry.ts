@@ -1,11 +1,15 @@
 import { extendZodWithOpenApi, OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import {
   apiErrorSchema,
+  assigneeRequestSchema,
+  categoryRequestSchema,
+  closeRequestSchema,
   customerSummarySchema,
   healthResponseSchema,
   messageSchema,
   pageInfoSchema,
   relatedTicketSchema,
+  replyRequestSchema,
   statsResponseSchema,
   ticketDetailSchema,
   ticketListQuerySchema,
@@ -46,6 +50,24 @@ const json = <T>(description: string, schema: T) => ({
 const errorResponses = {
   422: json('Request validation failed', ApiError),
   500: json('Unexpected error', ApiError),
+};
+
+/** Shared by every write path: the ticket is addressed by its human-facing number. */
+const numberParam = z.object({
+  number: z.coerce
+    .number()
+    .int()
+    .positive()
+    .openapi({ param: { name: 'number', in: 'path' }, example: 1 }),
+});
+
+const writeResponses = {
+  404: json('No ticket with that number', ApiError),
+  409: json(
+    'Illegal transition — most often an attempt to act on a CLOSED ticket, which is terminal',
+    ApiError,
+  ),
+  ...errorResponses,
 };
 
 registry.registerPath({
@@ -96,6 +118,110 @@ registry.registerPath({
     404: json('No ticket with that number', ApiError),
     ...errorResponses,
   },
+});
+
+// --- Writes ----------------------------------------------------------------
+//
+// Shaped as intents, not as a PATCH over ticket columns: there is no way to set
+// `status` directly, because that is what the transition service governs. Every
+// one of these writes an audit event.
+//
+// Until Phase 3 the acting user comes from the `x-acting-user` header (task
+// 2.1). Omit it and the reply is attributed to the first seeded agent by name.
+
+const actingUserHeader = z.object({
+  'x-acting-user': z
+    .string()
+    .uuid()
+    .optional()
+    .openapi({
+      param: { name: 'x-acting-user', in: 'header' },
+      description:
+        'TEMPORARY (task 2.1, removed at 3.13). The user id to attribute this write to — see GET /users. Defaults to the first active agent by name.',
+    }),
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/tickets/{number}/reply',
+  tags: ['Tickets'],
+  summary: 'Reply to a ticket',
+  description:
+    'Persists an outbound message and hands the conversation back: `waitingOn` becomes CUSTOMER and the ticket drops out of the default queue without anyone resolving it. Replying to a RESOLVED ticket reopens it. Sending the mail itself arrives at task 6.9.',
+  request: {
+    params: numberParam,
+    headers: actingUserHeader,
+    body: { content: { 'application/json': { schema: replyRequestSchema } } },
+  },
+  responses: {
+    201: json('The updated ticket, including the new message', TicketDetail),
+    ...writeResponses,
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/tickets/{number}/resolve',
+  tags: ['Tickets'],
+  summary: 'Resolve a ticket',
+  description: 'Answered and believed complete. Still reopenable by a customer reply.',
+  request: { params: numberParam, headers: actingUserHeader },
+  responses: { 200: json('The resolved ticket', TicketDetail), ...writeResponses },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/tickets/{number}/close',
+  tags: ['Tickets'],
+  summary: 'Close a ticket',
+  description:
+    'Terminal. Normally reached by the 14-day sweep; done by hand for spam and duplicates. A later customer reply opens a new cross-linked ticket rather than reopening this one.',
+  request: {
+    params: numberParam,
+    headers: actingUserHeader,
+    body: { content: { 'application/json': { schema: closeRequestSchema } } },
+  },
+  responses: { 200: json('The closed ticket', TicketDetail), ...writeResponses },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/tickets/{number}/reopen',
+  tags: ['Tickets'],
+  summary: 'Reopen a resolved ticket',
+  description: 'RESOLVED → OPEN. A CLOSED ticket cannot be reopened.',
+  request: { params: numberParam, headers: actingUserHeader },
+  responses: { 200: json('The reopened ticket', TicketDetail), ...writeResponses },
+});
+
+registry.registerPath({
+  method: 'patch',
+  path: '/tickets/{number}/assignee',
+  tags: ['Tickets'],
+  summary: 'Claim or unclaim a ticket',
+  description:
+    'Assignment is optional and never restrictive — any agent can still act on any ticket. Null unclaims.',
+  request: {
+    params: numberParam,
+    headers: actingUserHeader,
+    body: { content: { 'application/json': { schema: assigneeRequestSchema } } },
+  },
+  responses: { 200: json('The updated ticket', TicketDetail), ...writeResponses },
+});
+
+registry.registerPath({
+  method: 'patch',
+  path: '/tickets/{number}/category',
+  tags: ['Tickets'],
+  summary: 'Set or correct the category',
+  description:
+    'Leaves `aiCategory` untouched: the gap between what the classifier said and what an agent chose is the labeled eval data the Phase 5 accuracy gate measures against.',
+  request: {
+    params: numberParam,
+    headers: actingUserHeader,
+    body: { content: { 'application/json': { schema: categoryRequestSchema } } },
+  },
+  responses: { 200: json('The updated ticket', TicketDetail), ...writeResponses },
 });
 
 registry.registerPath({
