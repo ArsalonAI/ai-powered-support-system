@@ -259,8 +259,8 @@ Build order. Task-level detail is in [implementation-plan.md](./implementation-p
 | # | Phase | Delivers |
 | --- | --- | --- |
 | 1 | Project setup | Scaffolding, database, Prisma schema, admin seed |
-| 2 | Authentication | Login, sessions, route protection |
-| 3 | Ticket CRUD | Core ticket operations, list/detail with filtering |
+| 2 | Ticket CRUD | Core ticket operations, list/detail with filtering |
+| 3 | Authentication | Login, sessions, route protection |
 | 4 | User management | Admin CRUD for agents, role-based access |
 | 5 | AI features | Classification, summaries, suggested replies |
 | 6 | Email integration | Gmail polling → tickets, outbound replies |
@@ -278,6 +278,12 @@ Two consequences worth stating in the spec rather than discovering in the build:
 - **User invites and password resets need email**, which arrives in Phase 6.
   Phase 4 therefore ships with a one-time password shown once in the admin UI,
   and switches to emailed links once outbound send exists.
+- **Ticket work precedes authentication**, so the queue can be driven against the
+  seeded corpus rather than built blind behind a login that does not exist yet.
+  The consequence is that **the system is unauthenticated until Phase 3**, and
+  during Phase 2 it is writable by anyone who can reach it. Replies, assignments,
+  and audit entries are still attributed to a real seeded agent — the roles and
+  attribution rules above are never relaxed, only the login is deferred.
 
 ## Out of Scope
 

@@ -24,12 +24,14 @@ that contradicts them is a defect even when it is internally consistent:
 | --- | --- |
 | `docs/prd.md` | Roles, ticket lifecycle, grounding rule, success metrics |
 | `docs/tech-stack.md` | Stack choices *and their rationale* — read the rationale before proposing an alternative |
-| `docs/implementation-plan.md` | Task-level build order, numbered `1.1`–`8.11` |
+| `docs/implementation-plan.md` | Task-level build order, numbered `1.1`–`8.11`. **Phase 2 is Ticket CRUD and Phase 3 is Authentication** — they were swapped deliberately |
 
 **The build is phase-driven and strictly sequential.** `README.md`'s Status
 section names the current phase. Work the numbered tasks of that phase; do not
 build ahead into a later one. Conversely, do not report a later phase's absence
-as a bug — Phase 1 has no login by design.
+as a bug — **Phases 1 and 2 have no login by design.** Authentication is Phase 3,
+deliberately after ticket work so the queue can be driven against the seeded
+corpus.
 
 Several decisions look like over-engineering until you read why: the plain
 `Job` table instead of a job library, the knowledge base in a cached prompt
@@ -83,9 +85,11 @@ to typecheck, the two have drifted and one of them is wrong.
 Express plumbing (error middleware, request context); domain modules live
 alongside it.
 
-**No public unauthenticated routes.** Email is polled rather than pushed, so
-there is no webhook to expose. Everything except `/api/health` sits behind
-session auth from Phase 2 onward.
+**No public unauthenticated routes — from Phase 3 onward.** Email is polled
+rather than pushed, so there is no webhook to expose. Everything except
+`/api/health` sits behind session auth once Phase 3 lands. Until then the whole
+API is open, which is why every route is mounted as one block in `src/app.ts`:
+Phase 3 wraps that block, rather than sweeping every file.
 
 ## Invariants enforced by the database
 
@@ -107,9 +111,15 @@ scripts, and a `psql` session all bypass it — and because each of these fails
 
 ## Domain rules that shape the code
 
-- **Every status change goes through the transition service** (Phase 3) — never
+- **Every status change goes through the transition service** (Phase 2) — never
   a raw `prisma.ticket.update({ data: { status } })`. Every transition writes an
   audit event.
+- **Anything needing "who is acting" goes through `getActingUser(req)`** — the
+  temporary seam from task 2.1, never an ad-hoc user lookup. It resolves to a
+  real seeded agent, so the author and audit-actor CHECK constraints stay
+  satisfied with genuine IDs. Task 3.13 **deletes** it and moves the call sites
+  to `req.session.userId`; it refuses to construct when `NODE_ENV=production`,
+  because an impersonation header must never outlive the phase that needed it.
 - **`CLOSED` is terminal.** A reply to a closed ticket opens a *new* ticket,
   cross-linked to the original. This is why `gmailThreadId` is indexed but
   **not unique**: reply mapping resolves to the newest non-closed ticket for a

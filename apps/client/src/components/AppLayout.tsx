@@ -30,7 +30,20 @@ export function AppLayout() {
               </NavLink>
             ))}
           </nav>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-4">
+            {/*
+              Served by Express, not React Router, so this is a plain anchor —
+              a NavLink would try to route it client-side and 404 in the SPA.
+              Same-origin via the dev proxy, so no host is hard-coded.
+            */}
+            <a
+              className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+              href="/api/docs"
+              target="_blank"
+              rel="noreferrer"
+            >
+              API docs
+            </a>
             <HealthIndicator />
           </div>
         </div>

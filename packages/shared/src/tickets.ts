@@ -19,7 +19,7 @@ export type TicketSort = z.infer<typeof ticketSortSchema>;
 
 /**
  * Filters for the ticket list. Every field is optional; the *caller* decides
- * the default view rather than the endpoint hard-coding it, because Phase 3's
+ * the default view rather than the endpoint hard-coding it, because Phase 2's
  * saved views need the same endpoint to serve other filter combinations.
  */
 export const ticketListQuerySchema = paginationQuerySchema.extend({

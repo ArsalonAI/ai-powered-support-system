@@ -28,7 +28,7 @@ const envSchema = z.object({
    * How many proxy hops to trust for `req.ip`. Nothing sits in front of the
    * API, so this is 0 — and it should stay 0 unless a reverse proxy is
    * genuinely added. Too high and a client can spoof its own address through
-   * `X-Forwarded-For`, which is what the Phase 2 per-IP rate limiter buckets
+   * `X-Forwarded-For`, which is what the Phase 3 per-IP rate limiter buckets
    * on.
    */
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),

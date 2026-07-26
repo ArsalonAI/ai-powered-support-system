@@ -54,7 +54,7 @@ registry.registerPath({
   tags: ['System'],
   summary: 'Liveness and database connectivity',
   description:
-    'The only route that stays public once authentication lands in Phase 2. Returns 503 when the database is unreachable.',
+    'The only route that stays public once authentication lands in Phase 3. Returns 503 when the database is unreachable.',
   responses: {
     200: json('Healthy', HealthResponse),
     503: json('Database unreachable', HealthResponse),

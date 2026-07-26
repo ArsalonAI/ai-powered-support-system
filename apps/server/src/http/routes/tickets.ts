@@ -6,11 +6,11 @@ import { ApiError } from '../api-error.js';
 import { parseParams, parseQuery } from '../validate.js';
 
 /**
- * Read side of the ticket domain, arriving ahead of Phase 3 so the seeded
+ * Read side of the ticket domain, arriving ahead of Phase 2 so the seeded
  * corpus is inspectable. Writes and status transitions are not here and must
- * not be added here — they go through the Phase 3 transition service.
+ * not be added here — they go through the Phase 2 transition service.
  *
- * Phase 2 wraps this router in `requireAuth`; nothing else about it changes.
+ * Phase 3 wraps this router in `requireAuth`; nothing else about it changes.
  */
 export const ticketsRouter: Router = Router();
 

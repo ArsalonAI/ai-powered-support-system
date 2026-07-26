@@ -2,7 +2,7 @@ import { apiErrorSchema, type ApiErrorCode, type FieldIssue } from '@support/sha
 
 /**
  * Thrown for every non-2xx API response. Carries the server's error code so
- * callers can branch on it — the global 401 handler in Phase 2 keys off
+ * callers can branch on it — the global 401 handler in Phase 3 keys off
  * `UNAUTHENTICATED`.
  */
 export class ApiClientError extends Error {

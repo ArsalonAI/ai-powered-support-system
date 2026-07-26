@@ -19,7 +19,7 @@ export function createApp(): Express {
   const app = express();
 
   // Exactly as many hops as there are proxies — see TRUST_PROXY_HOPS. The
-  // Phase 2 per-IP rate limiter is only as correct as this number.
+  // Phase 3 per-IP rate limiter is only as correct as this number.
   app.set('trust proxy', env.TRUST_PROXY_HOPS);
   app.disable('x-powered-by');
 
@@ -35,8 +35,9 @@ export function createApp(): Express {
 
   app.use('/api', healthRouter);
 
-  // Phase 2 wraps everything below this line in `requireAuth`; `/api/health`
-  // above it is the one route that stays public.
+  // Phase 3 wraps everything below this line in `requireAuth`; `/api/health`
+  // above it is the one route that stays public. Keep every router in this one
+  // block: it is what makes 3.10 a single wrapping rather than a sweep.
   app.use('/api', ticketsRouter);
   app.use('/api', usersRouter);
   app.use('/api', statsRouter);

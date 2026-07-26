@@ -1,7 +1,7 @@
 /**
  * Ticket fixtures — a deliverable, not scaffolding.
  *
- * Nothing creates tickets until Phase 6, so Phases 3 and 5 are built and
+ * Nothing creates tickets until Phase 6, so Phases 2 and 5 are built and
  * evaluated entirely against this corpus. The `expectedCategory` on each
  * fixture is the human label the Phase 5 classification eval (5.18) asserts
  * against, so these bodies need to read like real customer email — including
@@ -594,7 +594,7 @@ Sunil`,
   // Queue depth and eval mass.
   //
   // Two separate reasons these exist. The default view is `OPEN AND
-  // waiting_on = us`, so server-side pagination (3.11) needs more than a
+  // waiting_on = us`, so server-side pagination (2.12) needs more than a
   // screenful of tickets in that state or it cannot be exercised against real
   // data. And the 5.18 eval asserts >= 85% accuracy against these labels: at
   // n=14 that is "at most 2 wrong", which a genuinely 90%-accurate classifier

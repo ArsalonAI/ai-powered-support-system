@@ -478,7 +478,7 @@ model AuditEvent {
   @@map("audit_events")
 }
 
-/// Login attempts, for the per-account *and* per-IP rate limiting at 2.8.
+/// Login attempts, for the per-account *and* per-IP rate limiting at 3.8.
 ///
 /// This is durable state rather than an in-process counter. An in-memory
 /// limiter forgets every attempt on restart, which under `tsx watch` is any

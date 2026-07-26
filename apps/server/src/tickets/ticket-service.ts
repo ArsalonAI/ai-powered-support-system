@@ -10,7 +10,7 @@ import { prisma } from '../db/prisma.js';
 
 /**
  * Read side of the ticket domain. Writes — and every status transition — go
- * through the Phase 3 transition service, never through here.
+ * through the Phase 2 transition service, never through here.
  */
 
 /** Never selects a password hash. Explicit, rather than relying on remembering to strip it. */

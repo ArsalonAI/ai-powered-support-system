@@ -11,7 +11,7 @@ const AGENT_EMAILS = new Set([AGENT_ALEX, AGENT_MARIA, AGENT_SAM]);
 const ids = new Set(ticketFixtures.map((f) => f.id));
 
 /**
- * The fixtures are the Phase 3 development corpus *and* the Phase 5 eval set,
+ * The fixtures are the Phase 2 development corpus *and* the Phase 5 eval set,
  * so a broken fixture is a broken eval that still passes. These assertions are
  * cheap and catch the ways that happens quietly.
  */
@@ -29,7 +29,7 @@ describe('ticket fixtures', () => {
   });
 
   // The default queue view is `status = OPEN AND waitingOn = US`. Server-side
-  // pagination (3.11) cannot be exercised against a corpus that fits on one page.
+  // pagination (2.12) cannot be exercised against a corpus that fits on one page.
   it('fills the default queue view deeply enough to paginate', () => {
     const inDefaultView = ticketFixtures.filter((f) => f.status === 'OPEN' && f.waitingOn === 'US');
     expect(inDefaultView.length).toBeGreaterThanOrEqual(25);

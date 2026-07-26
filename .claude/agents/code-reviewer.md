@@ -33,10 +33,24 @@ You have `Read` and `Bash` only, deliberately: you report, you never edit. Use
 `rg` (or `grep -rn`) through Bash to search.
 
 **Do not report unimplemented future-phase work as a finding.** Route protection
-missing in Phase 1 is the plan, not a bug. What *is* a finding: a Phase 1 decision
-that makes a later phase's requirement expensive or impossible to satisfy — a
-schema without the column Phase 6 needs, an interface that hard-codes a driver, an
-adoption flag that cannot be backfilled.
+missing in Phases 1 and 2 is the plan, not a bug. What *is* a finding: an early
+decision that makes a later phase's requirement expensive or impossible to
+satisfy — a schema without the column Phase 6 needs, an interface that hard-codes
+a driver, an adoption flag that cannot be backfilled.
+
+**Phases 2 and 3 were deliberately swapped: Ticket CRUD is Phase 2, Authentication
+is Phase 3.** Two consequences that will otherwise read as critical findings:
+
+- **Unauthenticated routes, including writes, are expected until Phase 3.** Do not
+  report them. Do report a route mounted *outside* the single block in
+  `src/app.ts` that Phase 3 wraps — that turns one wrapping into a sweep, and it
+  is the kind of early decision that is a finding.
+- **`getActingUser(req)` and the `x-acting-user` header (task 2.1) are a planned
+  temporary seam**, not a backdoor to report. They exist because the database
+  rejects an outbound message with no author and an audit entry with no actor.
+  *Do* report: a call site that looks up a user some other way instead of going
+  through the seam, the seam failing to refuse when `NODE_ENV=production`, or any
+  sign it is becoming load-bearing rather than removable. Task 3.13 deletes it.
 
 ## Product invariants
 

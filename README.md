@@ -23,17 +23,29 @@ network are the Gmail API and the Anthropic API.
 
 **Phase 1 complete** — scaffolding, schema, and seed data. The app boots, the
 full schema is migrated, and a realistic ticket corpus is seeded. Next is
-[Phase 2 — Authentication](docs/implementation-plan.md#phase-2--authentication);
-until it lands there is no login and no route protection.
+[Phase 2 — Ticket CRUD](docs/implementation-plan.md#phase-2--ticket-crud).
 
-Two Phase 1 items are deliberately only half-landed, because their other half
-belongs to a later phase:
+**There is no login, and there will not be until Phase 3.** Authentication sits
+*after* ticket work on purpose: the queue is the product, and building it behind
+a login that does not exist yet means building it blind. So the app is open, and
+during Phase 2 it is writable by anyone who can reach it. Run it on localhost.
+
+Attribution is not relaxed by that — the database rejects an outbound message
+with no author and an audit entry with no actor. Task 2.1 supplies a temporary
+`getActingUser(req)` seam that resolves to a real seeded agent, and task 3.13
+deletes it once sessions exist.
+
+Items deliberately only half-landed, because their other half belongs to a later
+phase:
 
 - **Forced password change (1.15)** exists as the `mustChangePassword` column
-  and is set by the bootstrap seed. Nothing enforces it until Phase 2 builds
+  and is set by the bootstrap seed. Nothing enforces it until Phase 3 builds
   the login flow.
-- **argon2id hashing (2.1)** shipped early, because the bootstrap admin seed
+- **argon2id hashing (3.1)** shipped early, because the bootstrap admin seed
   cannot hash a password without it.
+- **Ticket, user, and stats read endpoints** landed ahead of their phases so the
+  seeded corpus is explorable. They cover the server side of 2.11–2.14 and parts
+  of 7.1/7.2/7.4; the UI for all of it is outstanding.
 
 ## Repository layout
 
@@ -69,7 +81,7 @@ users, and aggregate stats. The OpenAPI document is generated from the same Zod
 schemas the server validates against, so it cannot drift from the code.
 
 It is **disabled in production** (`ENABLE_API_DOCS`), and these endpoints are
-unauthenticated only because Phase 2 has not shipped; they move behind
+unauthenticated only because Phase 3 has not shipped; they move behind
 `requireAuth` when it does.
 
 | Command | Does |
