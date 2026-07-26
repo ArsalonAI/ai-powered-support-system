@@ -17,7 +17,6 @@
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
     "db:migrate": "pnpm --filter @support/server db:migrate",
-    "db:migrate:deploy": "pnpm --filter @support/server db:migrate:deploy",
     "db:reset": "pnpm --filter @support/server db:reset",
     "db:seed": "pnpm --filter @support/server db:seed",
     "db:studio": "pnpm --filter @support/server db:studio"

@@ -3,9 +3,9 @@ import { hashPassword } from '../../src/auth/password.js';
 import { AGENT_ALEX, AGENT_MARIA, AGENT_SAM } from './ticket-fixtures.js';
 
 /**
- * There is no self-service signup, so the first admin has to be seeded — the
- * first deploy otherwise locks you out of your own system. Credentials come
- * from the environment (Secrets Manager in AWS), never from a literal here.
+ * There is no self-service signup, so the first admin has to be seeded — a
+ * fresh database otherwise locks you out of your own system. Credentials come
+ * from the environment, never from a literal here.
  */
 export async function seedBootstrapAdmin(prisma: PrismaClient): Promise<void> {
   const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.toLowerCase().trim();
@@ -34,8 +34,8 @@ export async function seedBootstrapAdmin(prisma: PrismaClient): Promise<void> {
       name,
       role: 'ADMIN',
       passwordHash: await hashPassword(password),
-      // The bootstrap credential is shared and lives in a secrets store; it is
-      // a way in, not a password anyone should keep using.
+      // The bootstrap credential sits in plaintext in `.env`; it is a way in,
+      // not a password anyone should keep using.
       mustChangePassword: true,
     },
   });

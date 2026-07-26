@@ -2,8 +2,7 @@ import { hash, verify } from '@node-rs/argon2';
 
 /**
  * argon2id. Parameters follow OWASP's second recommended configuration
- * (19 MiB, t=2, p=1) — enough work to matter on a Fargate task without making
- * a login feel slow.
+ * (19 MiB, t=2, p=1) — enough work to matter without making a login feel slow.
  */
 const ARGON2_OPTIONS = {
   memoryCost: 19_456,

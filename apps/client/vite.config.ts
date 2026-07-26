@@ -14,9 +14,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // Mirrors the production topology: CloudFront serves the SPA at `/` and
-    // routes `/api/*` to the ALB, so the browser only ever sees one origin.
-    // Same-origin is what lets session cookies stay SameSite=Lax with no CORS.
+    // The browser only ever sees one origin: Vite serves the SPA at `/` and
+    // forwards `/api/*` to the API. Same-origin is what lets session cookies
+    // stay SameSite=Lax with no CORS — do not replace this with an absolute
+    // API URL.
     proxy: {
       '/api': { target: API_TARGET, changeOrigin: false },
     },

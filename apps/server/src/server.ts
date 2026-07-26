@@ -5,9 +5,9 @@ import { logger } from './observability/logger.js';
 import { storage } from './storage/index.js';
 
 // Construct the storage driver at boot rather than on first use. A driver that
-// is configured but unimplemented must crash the deploy, not the first inbound
-// email that happens to carry an attachment — that failure would stall
-// ingestion with no signal until the dead-man's switch fires hours later.
+// cannot be configured must crash at startup, not on the first inbound email
+// that happens to carry an attachment — that failure would stall ingestion with
+// no signal until the dead-man's switch fires hours later.
 const storageDriver = storage();
 
 const app = createApp();
@@ -20,7 +20,7 @@ async function shutdown(signal: string): Promise<void> {
   server.close(() => {
     void disconnectPrisma().finally(() => process.exit(0));
   });
-  // ECS sends SIGTERM and kills after 30s; don't hang past that.
+  // A hung in-flight request must not hold the process open indefinitely.
   setTimeout(() => process.exit(1), 10_000).unref();
 }
 

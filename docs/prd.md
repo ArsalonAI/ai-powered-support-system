@@ -242,14 +242,15 @@ Definitions that matter for measurement:
 | Ingest latency | 30–60 seconds (polling interval); acceptable given human review of every reply |
 | Knowledge base size | Expected small; measured empirically before the AI phase, since it determines whether retrieval is needed at all |
 | Browser support | Current Chrome, Safari, Firefox, Edge. Desktop only — no mobile layout in v1 |
+| Deployment | None. The system runs locally on one machine — no cloud account, no container image, no CI |
 | Availability | Business hours matter; no formal uptime SLA. Ingestion is resumable, so a brief outage delays tickets rather than losing them |
 | Data retention | Not yet decided — see Open Questions |
 
 These figures justify several architecture decisions in
-[tech-stack.md](./tech-stack.md): the single worker process, the plain
-database-backed job table, and shipping the knowledge base inside a cached
-prompt rather than standing up a vector store. If volume grows past roughly
-10× these numbers, revisit all three.
+[tech-stack.md](./tech-stack.md): running on one machine, the single worker
+process, the plain database-backed job table, and shipping the knowledge base
+inside a cached prompt rather than standing up a vector store. If volume grows
+past roughly 10× these numbers, revisit all four.
 
 ## Delivery Phases
 
@@ -264,7 +265,7 @@ Build order. Task-level detail is in [implementation-plan.md](./implementation-p
 | 5 | AI features | Classification, summaries, suggested replies |
 | 6 | Email integration | Gmail polling → tickets, outbound replies |
 | 7 | Dashboard | Stats overview, category breakdown |
-| 8 | Polish & deployment | Validation, error handling, Docker |
+| 8 | Polish & hardening | Validation, error handling, backup/restore, runbook |
 
 The domain model and AI are built against seeded tickets; email connects last.
 Two consequences worth stating in the spec rather than discovering in the build:
@@ -291,6 +292,7 @@ Not being built, and why:
 | AI-initiated actions (issuing refunds, order lookups) | The AI is read-only. It can explain refund *policy*, not refund *status*. |
 | Multilingual support | Not in v1. |
 | Mobile layout | Desktop only in v1. |
+| Cloud deployment, containers, CI | Not in v1 — it runs locally on one machine. A later revision may take this up; the architecture does not preclude it. |
 
 ## Open Questions
 

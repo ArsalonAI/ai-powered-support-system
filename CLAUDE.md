@@ -9,6 +9,12 @@ Customer email becomes a ticket; Claude classifies it, summarizes the thread, an
 drafts a reply citing knowledge base sources. **A human reviews and sends every
 message** — the AI has no send path.
 
+**It runs locally today.** No Docker, no cloud account, no CI pipeline, no
+deployment target — the only things it talks to over the network are the Gmail
+and Anthropic APIs. Hosting is expected to come back on the table later but is
+not specified anywhere yet, so build against the local setup and treat its
+absence as the current state of the plan rather than a gap to fill in passing.
+
 ## The specs are the source of truth
 
 Three documents in `docs/` are the specification, not background reading. Code
@@ -18,7 +24,7 @@ that contradicts them is a defect even when it is internally consistent:
 | --- | --- |
 | `docs/prd.md` | Roles, ticket lifecycle, grounding rule, success metrics |
 | `docs/tech-stack.md` | Stack choices *and their rationale* — read the rationale before proposing an alternative |
-| `docs/implementation-plan.md` | Task-level build order, numbered `1.1`–`8.17` |
+| `docs/implementation-plan.md` | Task-level build order, numbered `1.1`–`8.11` |
 
 **The build is phase-driven and strictly sequential.** `README.md`'s Status
 section names the current phase. Work the numbered tasks of that phase; do not
@@ -27,13 +33,14 @@ as a bug — Phase 1 has no login by design.
 
 Several decisions look like over-engineering until you read why: the plain
 `Job` table instead of a job library, the knowledge base in a cached prompt
-instead of a vector store, the single worker task. Each has a documented
-threshold for revisiting. Check it before changing course.
+instead of a vector store, the single worker process, the storage abstraction
+over one filesystem driver. Each has a documented threshold for revisiting.
+Check it before changing course.
 
 ## Commands
 
-Postgres comes from `docker compose up -d postgres` (or any local install
-exposing the same URL). First run:
+Postgres is a local install. Once, to create the role and both databases:
+`psql postgres -f apps/server/scripts/create-databases.sql`. Then:
 
 ```bash
 pnpm install                                  # builds packages/shared via its prepare script
@@ -44,12 +51,11 @@ pnpm dev                                      # server :3000, client :5173
 
 | Command | Notes |
 | --- | --- |
-| `pnpm typecheck` \| `lint` \| `format:check` \| `test` \| `build` | Exactly what CI runs, in that order |
+| `pnpm typecheck` \| `lint` \| `format:check` \| `test` \| `build` | The verification sequence, in that order — nothing runs it for you |
 | `pnpm --filter @support/server test` | Migrates the test database first, then runs Vitest |
 | `pnpm --filter @support/server exec vitest run src/auth/password.test.ts` | One file — skips the test-DB migration, so run the line above at least once first |
 | `pnpm --filter @support/server exec vitest run -t 'rejects the wrong password'` | One test by name |
 | `pnpm db:reset` | Drop, re-migrate, re-seed |
-| `pnpm db:migrate:deploy` | The one-off migration task; what deploys run |
 
 `apps/server` and `apps/client` import `@support/shared` through its **built** `dist/`,
 which is gitignored. If either fails with `TS2307: Cannot find module
@@ -57,14 +63,14 @@ which is gitignored. If either fails with `TS2307: Cannot find module
 
 ## Architecture
 
-**Two processes, one Docker image, different entrypoints.** `api` serves
-`/api/*` and scales horizontally. `worker` polls Gmail and drains the job queue,
-and must stay at **exactly one task** — the job queue is concurrency-safe via
+**Two processes against one Postgres**, both started by `pnpm dev`. `api` serves
+`/api/*`. `worker` polls Gmail, drains the job queue, and runs the timed sweeps,
+and must stay at **exactly one process** — the job queue is concurrency-safe via
 `FOR UPDATE SKIP LOCKED`, but two Gmail pollers racing on the same `historyId`
 double-create tickets.
 
-**Same-origin is a constraint, not a convenience.** CloudFront serves the SPA at
-`/` and routes `/api/*` to the ALB; Vite's dev proxy mirrors this. It is what
+**Same-origin is a constraint, not a convenience.** Vite serves the SPA at `/`
+and proxies `/api/*` to the API, so the browser sees one origin. It is what
 keeps session cookies `SameSite=Lax` with no CORS. Do not introduce a
 cross-origin API URL.
 
@@ -119,8 +125,9 @@ scripts, and a `psql` session all bypass it — and because each of these fails
 - **Gmail idempotency** is the Gmail message ID, enforced by a unique index —
   not by a read-then-write check.
 - **Attachments go through the storage abstraction** (`apps/server/src/storage`),
-  never the AWS SDK directly. The driver is constructed at boot so a
-  misconfigured one crashes the deploy rather than the first attachment.
+  never `node:fs` at the call site. Keys are built from attacker-influenced
+  Gmail IDs and are validated in exactly one place. The driver is constructed at
+  boot so a misconfigured root crashes startup rather than the first attachment.
 
 ## Conventions worth knowing
 
@@ -128,9 +135,10 @@ scripts, and a `psql` session all bypass it — and because each of these fails
   read the same file. The environment is parsed once at boot through Zod and the
   process exits if it does not validate.
 - **Tests run against `helpdesk_test`**, truncating between files. Never point
-  `TEST_DATABASE_URL` at the dev database.
-- **Migrations run as a one-off task before deploy**, never on container start —
-  concurrent tasks would race.
+  `TEST_DATABASE_URL` at the dev database. Both databases come from
+  `apps/server/scripts/create-databases.sql`.
+- **Migrations are a deliberate command**, never something a process runs on
+  start.
 - **Seed fixtures are production-grade code, not scaffolding.**
   `apps/server/prisma/seeds/ticket-fixtures.ts` is both the development corpus and
   the Phase 5 classification eval set. Its assertions encode real requirements

@@ -33,8 +33,8 @@ export interface ApiRequestOptions {
 }
 
 /**
- * Same-origin by design — the SPA and `/api/*` are served from one CloudFront
- * distribution, so cookies stay `SameSite=Lax` and there is no CORS preflight.
+ * Relative by design — the SPA and `/api/*` share one origin, so cookies stay
+ * `SameSite=Lax` and there is no CORS preflight. Never make this absolute.
  */
 export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const { method = 'GET', body, signal } = options;

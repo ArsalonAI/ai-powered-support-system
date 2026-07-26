@@ -7,12 +7,16 @@ every message** — the AI never emails a customer on its own.
 
 Built for a small in-house support team (1–3 agents, under 50 tickets/day).
 
+**It runs locally.** Two Node processes and a Postgres on your machine — no
+containers, no cloud account, no CI. The only things it talks to over the
+network are the Gmail API and the Anthropic API.
+
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
 | [docs/prd.md](docs/prd.md) | Problem, users and roles, knowledge base, ticket lifecycle, success metrics, non-functional requirements, out of scope |
-| [docs/tech-stack.md](docs/tech-stack.md) | Stack decisions and their rationale — React/Express/Postgres/Prisma, session auth, Gmail polling, Claude, OpenTelemetry, Docker on AWS |
+| [docs/tech-stack.md](docs/tech-stack.md) | Stack decisions and their rationale — React/Express/Postgres/Prisma, session auth, Gmail polling, Claude, OpenTelemetry |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | Eight build phases with tasks, sizing, critical path, and risks |
 
 ## Status
@@ -41,20 +45,21 @@ belongs to a later phase:
 
 ## Getting started
 
-Requires Node 22+, pnpm, and Postgres 17 (via `docker compose up -d postgres`,
-or a local install exposing the same URL).
+Requires Node 22+, pnpm, and a running Postgres 17 (`brew install
+postgresql@17 && brew services start postgresql@17`, or any equivalent).
 
 ```bash
+psql postgres -f apps/server/scripts/create-databases.sql  # once: role + both databases
 pnpm install
-cp apps/server/.env.example apps/server/.env  # edit the bootstrap admin credentials
-pnpm db:migrate                               # apply migrations
-pnpm db:seed                                  # bootstrap admin, agents, ticket fixtures
-pnpm dev                                      # server on :3000, client on :5173
+cp apps/server/.env.example apps/server/.env               # edit the bootstrap admin credentials
+pnpm db:migrate                                            # apply migrations
+pnpm db:seed                                               # bootstrap admin, agents, ticket fixtures
+pnpm dev                                                   # server on :3000, client on :5173
 ```
 
-The SPA proxies `/api/*` to the API in development, mirroring the production
-topology where CloudFront serves both from one origin — that is what keeps
-session cookies `SameSite=Lax` with no CORS.
+The SPA proxies `/api/*` to the API, so the browser only ever sees one origin —
+that is what keeps session cookies `SameSite=Lax` with no CORS. Do not replace
+it with an absolute API URL.
 
 ## Exploring the API
 
@@ -69,9 +74,9 @@ unauthenticated only because Phase 2 has not shipped; they move behind
 
 | Command | Does |
 | --- | --- |
-| `pnpm typecheck` / `pnpm lint` / `pnpm test` / `pnpm build` | What CI runs, in that order |
-| `pnpm db:migrate:deploy` | The one-off migration task; what deploys run |
+| `pnpm typecheck` / `pnpm lint` / `pnpm format:check` / `pnpm test` / `pnpm build` | The verification sequence — run it before committing |
 | `pnpm db:reset` | Drop, re-migrate, and re-seed |
+| `pnpm db:studio` | Prisma Studio over the dev database |
 
 ## License
 

@@ -3,7 +3,7 @@ import { env, isProduction } from '../config/env.js';
 
 export const logger = pino({
   level: env.LOG_LEVEL,
-  // Structured JSON in production (CloudWatch parses it); readable locally.
+  // Structured JSON when NODE_ENV=production; readable line output locally.
   transport: isProduction ? undefined : { target: 'pino/file', options: { destination: 1 } },
   redact: {
     paths: [

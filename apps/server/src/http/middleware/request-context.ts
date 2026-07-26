@@ -5,7 +5,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      /** Correlates a client-visible error, a log line, and (from 8.10) an OTel trace. */
+      /** Correlates a client-visible error, a log line, and (from 8.5) an OTel trace. */
       requestId: string;
     }
   }

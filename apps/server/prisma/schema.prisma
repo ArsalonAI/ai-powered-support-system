@@ -321,7 +321,7 @@ model Attachment {
   filename    String
   contentType String
   sizeBytes   Int
-  /// Opaque key for the storage abstraction (filesystem locally, S3 deployed).
+  /// Opaque key for the storage abstraction; never a filesystem path.
   storageKey  String  @unique
   checksum    String?
 
@@ -480,11 +480,10 @@ model AuditEvent {
 
 /// Login attempts, for the per-account *and* per-IP rate limiting at 2.8.
 ///
-/// This has to be shared state: the `api` service runs two or more Fargate
-/// tasks, so an in-process limiter gives an attacker one bucket per task and
-/// resets every counter on each rolling deploy — while looking perfectly
-/// correct in a single-task dev environment. Redis is explicitly rejected by
-/// the stack, so the attempts live in the same Postgres.
+/// This is durable state rather than an in-process counter. An in-memory
+/// limiter forgets every attempt on restart, which under `tsx watch` is any
+/// file save, and it is invisible to the worker process. Redis is explicitly
+/// rejected by the stack, so the attempts live in the same Postgres.
 ///
 /// Backoff is preferred to lockout: a lockout policy hands an attacker a
 /// denial-of-service against the whole support team.

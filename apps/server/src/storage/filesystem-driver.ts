@@ -10,8 +10,8 @@ import {
 } from './types.js';
 
 /**
- * Local stand-in for S3. Same interface, same call sites — the only difference
- * is where the bytes land and what `signedUrl` can promise.
+ * Attachments on the local disk, under `STORAGE_LOCAL_ROOT`. Keys are built
+ * from attacker-influenced Gmail IDs, so every path goes through `pathFor`.
  */
 export class FilesystemStorageDriver implements StorageDriver {
   readonly name = 'filesystem' as const;
