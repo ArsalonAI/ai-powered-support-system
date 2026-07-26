@@ -2,6 +2,7 @@
   "name": "ai-powered-support-system",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.17.0",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -9,24 +10,24 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
+    "dev:worker": "pnpm --filter @support/server dev:worker",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
-    "db:migrate": "pnpm --filter @support/api db:migrate",
-    "db:migrate:deploy": "pnpm --filter @support/api db:migrate:deploy",
-    "db:reset": "pnpm --filter @support/api db:reset",
-    "db:seed": "pnpm --filter @support/api db:seed",
-    "db:studio": "pnpm --filter @support/api db:studio"
+    "db:migrate": "pnpm --filter @support/server db:migrate",
+    "db:reset": "pnpm --filter @support/server db:reset",
+    "db:seed": "pnpm --filter @support/server db:seed",
+    "db:studio": "pnpm --filter @support/server db:studio"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "prettier": "^3.4.2",
-    "typescript": "^5.7.3",
+    "typescript": "catalog:",
     "typescript-eslint": "^8.21.0"
   }
 }

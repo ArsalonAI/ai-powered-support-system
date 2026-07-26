@@ -2,7 +2,7 @@
  * Domain enums shared by the API and the web client.
  *
  * These mirror the Prisma enums one-for-one and are the wire format. Prisma
- * generates its own enum objects at runtime; `apps/api/src/domain/enums.ts`
+ * generates its own enum objects at runtime; `apps/server/src/domain/enums.ts`
  * asserts at compile time that the two never drift.
  */
 

@@ -8,34 +8,42 @@ Decisions for the AI-powered support system. See [prd.md](./prd.md) for scope.
 | --- | --- |
 | Frontend | React + TypeScript (Vite), Tailwind + shadcn/ui, TanStack Table + TanStack Query |
 | Backend | Node + Express + TypeScript |
-| Database | PostgreSQL (RDS) |
+| Database | PostgreSQL, installed locally |
 | ORM | Prisma |
 | Auth | Local users in Postgres, password + server-side session cookie |
 | Email | Gmail API — History-API polling in, Gmail send out |
 | AI | `@anthropic-ai/sdk`, `claude-opus-5` |
-| Observability | OpenTelemetry → ADOT collector → CloudWatch / X-Ray |
-| Packaging | Docker |
-| Hosting | AWS: ECS Fargate, RDS, ALB, CloudFront, S3, Secrets Manager, EventBridge |
+| Observability | OpenTelemetry SDK, OTLP out |
+| Hosting | None. This runs on a developer machine. |
+
+**This system runs locally.** There is no container image, no cloud account, no
+CI pipeline, and no deployment target. The only external services it talks to
+are the Gmail API and the Anthropic API — everything else is a process or a file
+on the machine running it. Nothing below should reintroduce infrastructure to
+solve a problem that a single machine does not have.
 
 ## Processes
 
-One Docker image, two ECS services, different entrypoints:
+Two Node processes against one Postgres, started together by `pnpm dev`:
 
-- **`api`** — Express. Serves `/api/*`. Horizontally scalable.
-- **`worker`** — polls Gmail for new mail and processes queued AI jobs
-  (classify, summarize, draft). **Single instance.**
+- **`api`** — Express. Serves `/api/*`.
+- **`worker`** — polls Gmail for new mail, processes queued AI jobs (classify,
+  summarize, draft), and runs the auto-resolve (7-day) and auto-close (14-day)
+  sweeps on a plain interval. **Exactly one process.**
 
-Plus **EventBridge scheduled tasks** for the auto-resolve (7-day) and
-auto-close (14-day) sweeps.
+They are split because their failure modes and lifetimes differ: a crash in the
+Gmail poller should not take down the API, and restarting the API on a file save
+should not restart a poll cycle mid-flight.
 
-The worker must stay at one task. The job queue is concurrency-safe via
-`FOR UPDATE SKIP LOCKED`, but the Gmail polling loop is not — two pollers
-racing on the same `historyId` will double-create tickets.
+The worker must stay at one process. The job queue is concurrency-safe via
+`FOR UPDATE SKIP LOCKED`, but the Gmail polling loop is not — two pollers racing
+on the same `historyId` will double-create tickets. Locally that means: don't
+run a second `pnpm dev` in another terminal.
 
 ## Frontend
 
-Vite + React + TypeScript, built to static assets and served from S3 behind
-CloudFront.
+Vite + React + TypeScript. `pnpm dev` serves it; `pnpm build` emits static
+assets to `dist/`.
 
 - **TanStack Query** for server state.
 - **TanStack Table** for the ticket list (filter, sort, paginate).
@@ -43,8 +51,8 @@ CloudFront.
 
 ### Same-origin requirement
 
-CloudFront serves the SPA at `/` and routes `/api/*` to the ALB in front of the
-`api` service. This is a deliberate constraint, not a convenience:
+The browser sees one origin: Vite serves the SPA at `/` and proxies `/api/*` to
+the `api` process. This is a deliberate constraint, not a convenience:
 
 - Session cookies work with `SameSite=Lax` — no `SameSite=None`, no third-party
   cookie exposure.
@@ -58,8 +66,8 @@ Express + TypeScript. Structure by domain (`tickets/`, `email/`, `ai/`, `kb/`,
 - **Validation:** Zod at every route boundary. Inbound email is untrusted input.
 - **Errors:** one error middleware; never leak stack traces past it.
 - **Config:** parse the environment once at boot through a Zod schema and fail
-  fast. A missing Gmail or Anthropic credential should crash on deploy, not on
-  the first ticket.
+  fast. A missing Gmail or Anthropic credential should crash at startup, not on
+  the first ticket. `apps/server/.env` is the whole configuration story.
 
 **No public unauthenticated routes.** Because email is polled rather than pushed,
 every route except `/api/health` sits behind session auth. There is no webhook
@@ -132,9 +140,9 @@ the moment the account is disabled.
 
 ### Bootstrap
 
-There is no signup, so the first admin must be seeded — a one-off ECS task that
-creates an admin from Secrets Manager values and forces a password change on
-first login. Easy to forget until the first deploy leaves you locked out of your
+There is no signup, so the first admin must be seeded — `pnpm db:seed` creates
+an admin from `BOOTSTRAP_ADMIN_*` in `.env` and forces a password change on
+first login. Easy to forget until a fresh database leaves you locked out of your
 own system.
 
 ### Authorization
@@ -148,12 +156,12 @@ Prisma against Postgres.
 
 - **Enums** for `TicketStatus`, `TicketCategory`, `WaitingOn`,
   `ClassificationState`, `Role` — the state machine belongs in the schema.
-- **Connection pooling:** Fargate tasks × Prisma pool size must stay under the
-  RDS `max_connections`. Set `connection_limit` explicitly in the datasource URL
-  rather than taking the default.
+- **Connection pooling:** set `connection_limit` explicitly in the datasource
+  URL rather than taking Prisma's default (`num_cpus * 2 + 1`), which varies by
+  machine. Two processes share one local server.
 - **Audit log is append-only.** No update or delete paths in application code.
-- **Migrations run as a one-off ECS task** before the service deploys, never on
-  container start — concurrent tasks would race.
+- **Migrations are a deliberate command** (`pnpm db:migrate`), never something
+  a process runs on start.
 - **Model the full schema up front**, including tables whose features are phases
   away. Retrofitting Gmail `threadId` storage or session-by-user lookup onto a
   live table is a data migration; adding them to the initial migration is free.
@@ -175,19 +183,17 @@ for Prisma Migrate to fight with in exchange for features we don't use. Jobs are
 best-effort with a retry count; if one is lost, the ticket is still visible and
 workable without its AI draft.
 
-### Local substitutes
+### Attachment storage
 
-Two AWS services have local stand-ins so that no build phase is blocked on
-deployed infrastructure:
+Inbound attachments are written to the local disk under `STORAGE_LOCAL_ROOT`,
+never into the database.
 
-| Service | Local | Used by |
-|---|---|---|
-| S3 | MinIO in `docker-compose`, or a filesystem driver | Attachments |
-| EventBridge | A plain interval in the worker | Auto-resolve / auto-close sweeps |
-
-Attachments go through a small storage interface (`put` / `get` / `signedUrl`)
-rather than the AWS SDK directly, so the driver swaps at deploy time without
-touching call sites.
+They go through a small storage interface (`put` / `get` / `signedUrl` /
+`exists` / `delete`) rather than `node:fs` at the call site. The seam is worth
+keeping even with a single driver: attachment keys are built from
+attacker-influenced Gmail IDs, and one place that validates them beats every
+handler remembering to. The driver is constructed at boot, so a misconfigured
+root fails at startup rather than on the first email that carries a file.
 
 ## Email
 
@@ -201,7 +207,7 @@ One-time, roughly half an hour, no DNS involved:
 
 1. Google Cloud project; enable the Gmail API.
 2. OAuth client; consent once as the shared mailbox account.
-3. Store the resulting **refresh token** in Secrets Manager.
+3. Put the resulting **refresh token** in `apps/server/.env`.
 
 **Confirm before building:** the shared inbox must be a real mailbox, not a
 Google Group. Groups do not expose the same API surface.
@@ -224,7 +230,7 @@ seconds.
   with a bounded full resync rather than crashing.
 - **Store the Gmail message ID** and treat it as an idempotency key — a poll
   that overlaps a retry must not create the ticket twice.
-- **Attachments** go to S3, never the database.
+- **Attachments** go to the storage driver, never the database.
 - Suppress auto-responders and mail loops; drop obvious spam.
 
 Polling latency of 30–60 seconds is irrelevant here: every reply is written and
@@ -273,8 +279,14 @@ per call rather than swapping model tiers:
 
 ## Observability
 
-OpenTelemetry SDK in both processes, exporting OTLP to an **ADOT collector
-sidecar**, which forwards to CloudWatch (metrics/logs) and X-Ray (traces).
+OpenTelemetry SDK in both processes. There is no collector to run: the exporter
+is the console by default, and `OTEL_EXPORTER_OTLP_ENDPOINT` points it at a local
+Jaeger or an OTLP-compatible backend when you actually want to read traces.
+Structured logs come from `pino` and go to stdout.
+
+The instrumentation is not here for uptime — one machine's uptime is visible
+without it. It is here because it is the only way to see what the AI is costing
+and whether it is working.
 
 - **Auto-instrumentation** for HTTP and Express. Prisma emits OTel spans with
   its tracing feature enabled.
@@ -291,35 +303,47 @@ That last metric is product scope, not ops. It is the primary success measure
 for the whole system and must be instrumented from the first commit — unlike
 latency or error rate, there is no log to mine it out of later.
 
-**Tracing is not alerting.** The load-bearing alarm is a dead-man's switch:
+**Tracing is not alerting.** The load-bearing signal is a dead-man's switch:
 **no inbound email polled in N hours**. The polling loop can die quietly — a
-revoked refresh token, an unhandled `historyId` expiry, a crashed worker task —
-and nothing else will tell you the product has stopped receiving work.
+revoked refresh token, an unhandled `historyId` expiry, a crashed worker — and
+nothing else will tell you the product has stopped receiving work. Locally it
+surfaces as a banner in the SPA and an error-level log line; there is no pager.
 
-## Packaging and deployment
+## Running it
 
-**Docker:** multi-stage build, `node:22-alpine` runtime, non-root user, one
-image for both services with different `command`s.
+```
+psql postgres -f apps/server/scripts/create-databases.sql   # once
+pnpm install && pnpm db:migrate && pnpm db:seed
+pnpm dev
+```
 
-**AWS:**
+That is the whole operational surface: a local Postgres, `pnpm dev`, and an
+`.env`. Verification is `pnpm typecheck && pnpm lint && pnpm format:check &&
+pnpm test && pnpm build`, run on the machine you are working on.
 
-- **ECR** for images
-- **ECS Fargate** — `api` service (≥2 tasks, behind ALB) and `worker` service
-  (exactly 1 task)
-- **RDS Postgres** — Multi-AZ, automated backups, private subnet only
-- **ALB** for the API; **CloudFront + S3** for the SPA, with `/api/*` routed to
-  the ALB from the same distribution
-- **Secrets Manager** — Anthropic API key, Google OAuth client ID/secret, Gmail
-  refresh token, session secret, bootstrap admin credentials, DB credentials.
-  Injected as ECS task secrets, never baked into images.
-- **EventBridge** — scheduled auto-resolve and auto-close sweeps
-- **CloudWatch** — logs, metrics, and the dead-man's-switch alarm
+Backups are `pg_dump`. Rolling back a bad migration is `pnpm db:reset` plus a
+re-seed, because the only data at risk is a seeded corpus. Both of those stop
+being adequate the moment a real customer's mail lands in this database — see
+below.
 
-**Deploy order:** build → push → run migration task → update services.
+### When this needs to leave the laptop
 
-Because email is polled rather than pushed, no phase is blocked on having
-deployed infrastructure — the whole system, email included, runs against a local
-Postgres and a real Gmail mailbox during development.
+Expected eventually, but not specified yet — this document stops at the local
+setup, and hosting decisions belong in a revision of it rather than in code
+written ahead of one.
+
+The *architecture* does not block the move: Postgres, the storage seam behind
+`put`/`get`/`signedUrl`, the plain `Job` table, and the same-origin rule are all
+standard and portable. What a hosting revision has to work through is the list
+this one has not solved — TLS and a real `secure` session cookie, secret storage
+that is not a file in the working tree, backups with a rehearsed restore, a
+durable home for attachments, keeping the worker pinned to exactly one instance,
+and a migration step that runs before the new code does.
+
+Two things in the current design are worth *not* undoing on the way, because
+they were chosen with this in mind: attachments already go through the storage
+abstraction rather than `node:fs`, and the SPA already calls `/api/*` relative
+rather than an absolute URL.
 
 ## Open items
 

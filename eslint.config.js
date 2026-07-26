@@ -10,7 +10,7 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/coverage/**',
       '**/generated/**',
-      'apps/api/prisma/migrations/**',
+      'apps/server/prisma/migrations/**',
     ],
   },
   js.configs.recommended,

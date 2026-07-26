@@ -2,10 +2,25 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
+# One declaration per shared dependency, referenced as `catalog:` from each
+# package. Tidiness is the lesser reason — `zod` is the real one: packages/shared
+# exports Zod schema instances that apps/server imports, and if the two ever
+# resolved to different majors the schemas would become mutually unassignable,
+# producing type errors that point nowhere near the cause.
+catalog:
+  '@prisma/client': ^6.19.3
+  prisma: ^6.19.3
+  typescript: ^5.9.3
+  vitest: ^3.2.7
+  zod: ^3.24.1
+
 # Postinstall build scripts we explicitly trust. Prisma's engines and esbuild's
 # binary both need theirs; everything else stays blocked by default.
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
+  # Install-time analytics pulled in by swagger-ui-dist. Nothing depends on it
+  # running, so it stays blocked.
+  '@scarf/scarf': false
   esbuild: true
   prisma: true

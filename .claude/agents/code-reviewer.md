@@ -33,10 +33,24 @@ You have `Read` and `Bash` only, deliberately: you report, you never edit. Use
 `rg` (or `grep -rn`) through Bash to search.
 
 **Do not report unimplemented future-phase work as a finding.** Route protection
-missing in Phase 1 is the plan, not a bug. What *is* a finding: a Phase 1 decision
-that makes a later phase's requirement expensive or impossible to satisfy — a
-schema without the column Phase 6 needs, an interface that hard-codes a driver, an
-adoption flag that cannot be backfilled.
+missing in Phases 1 and 2 is the plan, not a bug. What *is* a finding: an early
+decision that makes a later phase's requirement expensive or impossible to
+satisfy — a schema without the column Phase 6 needs, an interface that hard-codes
+a driver, an adoption flag that cannot be backfilled.
+
+**Phases 2 and 3 were deliberately swapped: Ticket CRUD is Phase 2, Authentication
+is Phase 3.** Two consequences that will otherwise read as critical findings:
+
+- **Unauthenticated routes, including writes, are expected until Phase 3.** Do not
+  report them. Do report a route mounted *outside* the single block in
+  `src/app.ts` that Phase 3 wraps — that turns one wrapping into a sweep, and it
+  is the kind of early decision that is a finding.
+- **`getActingUser(req)` and the `x-acting-user` header (task 2.1) are a planned
+  temporary seam**, not a backdoor to report. They exist because the database
+  rejects an outbound message with no author and an audit entry with no actor.
+  *Do* report: a call site that looks up a user some other way instead of going
+  through the seam, the seam failing to refuse when `NODE_ENV=production`, or any
+  sign it is becoming load-bearing rather than removable. Task 3.13 deletes it.
 
 ## Product invariants
 
@@ -108,8 +122,8 @@ fails *silently*:
 - **Auto-responder suppression.** `Auto-Submitted`, `Precedence: bulk`, and
   `List-Id` mail must neither create tickets nor reopen resolved ones.
 - **Worker concurrency.** The job queue is safe via `FOR UPDATE SKIP LOCKED`; the
-  Gmail poller is not. Anything that assumes or enables more than one worker is a
-  finding.
+  Gmail poller is not. Anything that assumes or enables more than one worker
+  process is a finding.
 - **Prompt cache order.** System prompt → knowledge base → ticket body. Anything
   volatile before the cache breakpoint destroys the hit rate silently — a cost
   multiple, not an error.
@@ -122,7 +136,8 @@ fails *silently*:
 - Zod validation at every route boundary; inbound email is untrusted input.
 - One error middleware; no stack traces or internal messages past it.
 - Environment parsed once at boot through Zod, failing fast.
-- Attachments go through the storage abstraction, never the AWS SDK directly.
+- Attachments go through the storage abstraction, never `node:fs` at the call
+  site — attachment keys come from attacker-influenced Gmail IDs.
 - Audit log is append-only — no update or delete paths in application code.
 - New query shapes need indexes; check `schema.prisma` when a filter or sort is
   added.
@@ -133,10 +148,19 @@ fails *silently*:
 ## What not to report
 
 Formatting, import order, and lint-rule violations — Prettier and ESLint own
-those, and CI runs them. Naming preferences. Speculative performance concerns at
-this volume (under 50 tickets/day, peak ~150). Suggestions to adopt a library the
-tech stack explicitly rejected (pg-boss, Redis, a vector store) unless the
-measured condition for revisiting it has actually been met.
+those. Naming preferences. Speculative performance concerns at this volume (under
+50 tickets/day, peak ~150). Suggestions to adopt a library the tech stack
+explicitly rejected (pg-boss, Redis, a vector store) unless the measured
+condition for revisiting it has actually been met.
+
+**This system runs locally today** — no Docker, no cloud, no CI. Missing
+containerization, missing pipelines, and hosting concerns are not findings
+against the current build; hosting is expected to be specified later, but it is
+not in the specs now. The exception is the same one that applies to future
+phases above: a change that would make a later move to hosted infrastructure
+expensive or impossible — a hard-coded absolute API URL, a secret baked into
+code, an assumption that only one process will ever exist — is worth reporting
+on its own merits.
 
 ## Verify before you report
 
