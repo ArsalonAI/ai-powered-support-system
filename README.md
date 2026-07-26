@@ -21,9 +21,13 @@ network are the Gmail API and the Anthropic API.
 
 ## Status
 
-**Phase 1 complete** — scaffolding, schema, and seed data. The app boots, the
-full schema is migrated, and a realistic ticket corpus is seeded. Next is
-[Phase 2 — Ticket CRUD](docs/implementation-plan.md#phase-2--ticket-crud).
+**Phase 1 complete. [Phase 2 — Ticket CRUD](docs/implementation-plan.md#phase-2--ticket-crud)
+is in progress** — the transition service, write endpoints, queue, and ticket
+detail all work. An agent can open the app, work the seeded queue, and triage,
+reply to, and resolve a ticket end to end.
+
+Run `pnpm dev:worker` in a second terminal for the timed sweeps. It must stay at
+exactly one process.
 
 **There is no login, and there will not be until Phase 3.** Authentication sits
 *after* ticket work on purpose: the queue is the product, and building it behind

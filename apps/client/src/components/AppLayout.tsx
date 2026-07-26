@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router';
+import { ActingUserSwitcher } from '../features/agents/ActingUserSwitcher';
 import { HealthIndicator } from '../features/health/HealthIndicator';
 
 const NAV = [
@@ -31,6 +32,7 @@ export function AppLayout() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-4">
+            <ActingUserSwitcher />
             {/*
               Served by Express, not React Router, so this is a plain anchor —
               a NavLink would try to route it client-side and 404 in the SPA.
