@@ -97,6 +97,30 @@ const envSchema = z.object({
   STORAGE_LOCAL_ROOT: z.string().default('.storage'),
 
   /**
+   * Anthropic credentials. Optional *here* and mandatory where it matters:
+   * only the worker calls Claude, so `assertAiConfigured()` fails that process
+   * at boot rather than every process — the API serves the queue perfectly well
+   * without a key, and the test suite must never have one.
+   *
+   * That is the same shape as the storage driver and the dev dashboard: the
+   * check lives at the entry point of the process that needs it, so a missing
+   * credential crashes at startup instead of on the first ticket.
+   */
+  ANTHROPIC_API_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  /**
+   * The stack picks one model and tunes `effort` per call rather than swapping
+   * tiers — see docs/tech-stack.md. Overridable so a model can be pinned during
+   * an incident without a code change.
+   */
+  ANTHROPIC_MODEL: z.string().default('claude-opus-5'),
+  /**
+   * Per-request ceiling. A summary that has not returned in this long is not
+   * worth waiting for: the job goes back on the queue and the ticket stays
+   * workable meanwhile.
+   */
+  ANTHROPIC_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+
+  /**
    * Seeded by the bootstrap-admin task only; not required to boot the API.
    *
    * The password is rejected if it is a known placeholder for the same reason

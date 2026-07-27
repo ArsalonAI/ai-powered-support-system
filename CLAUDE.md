@@ -26,12 +26,21 @@ that contradicts them is a defect even when it is internally consistent:
 | `docs/tech-stack.md` | Stack choices *and their rationale* — read the rationale before proposing an alternative |
 | `docs/implementation-plan.md` | Task-level build order, numbered `1.1`–`8.11`. **Phase 2 is Ticket CRUD and Phase 3 is Authentication** — they were swapped deliberately |
 
-**The build is phase-driven and strictly sequential.** `README.md`'s Status
-section names the current phase. Work the numbered tasks of that phase; do not
-build ahead into a later one. Conversely, do not report a later phase's absence
-as a bug — **Phases 1 and 2 have no login by design.** Authentication is Phase 3,
-deliberately after ticket work so the queue can be driven against the seeded
-corpus.
+**The build is phase-driven and largely sequential.** `README.md`'s Status
+section is the record of what has actually shipped. Work the numbered tasks of
+the current phase; do not build ahead into a later one on your own initiative.
+Conversely, do not report a later phase's absence as a bug — **Phases 1 and 2
+have no login by design.** Authentication is Phase 3, deliberately after ticket
+work so the queue can be driven against the seeded corpus.
+
+**One reorder has been taken, deliberately.** Phase 4 (User management) is
+deferred, and the first slice of Phase 5 shipped in its place: **5.1** (job
+queue), **5.2** (Anthropic client wrapper) and **5.9** (ticket summarization),
+with an on-demand trigger. The plan names Phase 4 as its one genuinely movable
+block — ticket work needs users to *exist*, not to be *manageable*, and the 1.16
+seeded agents supply that. Do not treat the missing admin CRUD as a defect, and
+do not treat the AI code as building ahead. Everything else in Phase 5 —
+knowledge base, classifier, drafts, grounding gate, OTel — is still unbuilt.
 
 Several decisions look like over-engineering until you read why: the plain
 `Job` table instead of a job library, the knowledge base in a cached prompt
@@ -48,7 +57,7 @@ Postgres is a local install. Once, to create the role and both databases:
 pnpm install                                  # builds packages/shared via its prepare script
 cp apps/server/.env.example apps/server/.env  # then edit the bootstrap admin credentials
 pnpm db:migrate && pnpm db:seed
-pnpm dev                                      # server :3000, client :5173
+pnpm dev                                      # api :3000, client :5173, worker (all three)
 ```
 
 | Command | Notes |
@@ -67,10 +76,17 @@ which is gitignored. If either fails with `TS2307: Cannot find module
 
 **Two processes against one Postgres**, both started by `pnpm dev`. `api` serves
 `/api/*`. `worker` polls Gmail, drains the job queue, and runs housekeeping —
-**never ticket status**, since the timed sweeps were cut — and must stay at
-**exactly one process** — the job queue is concurrency-safe via
-`FOR UPDATE SKIP LOCKED`, but two Gmail pollers racing on the same `historyId`
-double-create tickets.
+**never ticket status**, since the timed sweeps were cut.
+
+**Exactly one worker, enforced by a Postgres advisory lock** (`src/jobs/worker-lock.ts`).
+The job queue is concurrency-safe via `FOR UPDATE SKIP LOCKED`, but two Gmail
+pollers racing on the same `historyId` double-create tickets. A second worker
+takes the lock, fails, and exits 0 — so `pnpm dev` can start one automatically
+and running it twice is harmless rather than corrupting. The lock lives on its
+own connection, not a pooled one, so it releases when the process dies. Do not
+replace it with a flag or a pidfile: this is the same reasoning as the CHECK
+constraints, which is that an invariant enforced only in code fails silently.
+`pnpm dev:worker` still runs it alone.
 
 **Same-origin is a constraint, not a convenience.** Vite serves the SPA at `/`
 and proxies `/api/*` to the API, so the browser sees one origin. It is what
@@ -132,8 +148,14 @@ scripts, and a `psql` session all bypass it — and because each of these fails
   thing to build instead. The transition-service tests fail if a sweep returns.
 - **`waiting_on` is the triage signal**, not the status. The default queue view
   is `status = OPEN AND waitingOn = US`, oldest first.
-- **Classification never gates the agent.** `PENDING` or `FAILED` leaves the
-  ticket fully workable; `FAILED` surfaces a manual-triage badge.
+- **Classification and summarization never gate the agent.** `PENDING` or
+  `FAILED` leaves the ticket fully workable; `FAILED` surfaces a badge. The
+  summary is an orientation aid sitting above the thread it summarizes — if it
+  is missing, late, or failed, the agent reads the thread. Never block a reply,
+  a transition, or a queue view on AI output.
+- **A summary is not a status change**, so it does not go through the transition
+  service. It writes an audit event with `actorType = SYSTEM` and a null
+  `actorId` — the one kind of change no person made.
 - **Grounding is a hard requirement.** If nothing in the knowledge base supports
   an answer, the draft is *withheld* and the ticket flagged for research —
   never answered from the model's own knowledge. Withheld drafts measure
@@ -207,3 +229,24 @@ pricing, and SDK usage before writing integration code — do not answer from
 memory. Prompt order is stable-first (system → knowledge base → ticket body);
 anything volatile before the cache breakpoint silently destroys the cache hit
 rate, which is a cost multiple rather than an error.
+
+The shape to follow, established by the summarize job:
+
+- **Every Anthropic call goes through `src/ai/client.ts`.** It owns the model,
+  the timeout, and the parameter decisions. Do not call the SDK from a domain
+  module.
+- **`AiClient` is an interface so it can be faked.** Tests inject a stub and the
+  suite runs with no `ANTHROPIC_API_KEY` — keep it that way. A test that can
+  reach the real API is a test that can bill for a run.
+- **Every failure is classified retryable or terminal** in `src/ai/errors.ts`.
+  That single bit is what the queue uses to reschedule or dead-letter; a 400 or
+  a bad key must not consume five attempts.
+- **Do not set `thinking`, `temperature`, `top_p`, or `top_k`** — the latter
+  three are rejected by this model, and unset `thinking` means adaptive, which
+  is what you want. Control spend with `effort`.
+- **Structured output, not free text**, via `output_config.format`. Assistant
+  prefills are rejected by this model; a JSON schema is the replacement.
+- **Delimit customer-supplied text** and tell the model to treat it as data.
+  Anyone can email the support address.
+- **AI work runs in the worker, never in a request.** A route enqueues a job and
+  returns 202; the browser polls. See `src/jobs/`.

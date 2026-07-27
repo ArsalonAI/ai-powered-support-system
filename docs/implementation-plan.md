@@ -258,6 +258,17 @@ acting-user seam no longer exists.
 
 **Goal:** admins provision and deprovision agents, replacing the seeded accounts.
 
+> **Deferred — nothing here is built yet.** After Phase 3 the AI summaries were
+> prioritised instead, and tasks 5.1, 5.2 and 5.9 shipped ahead of this phase.
+> This is the reorder the Critical path section below already anticipated:
+> Phase 4 is the one genuinely movable block, because ticket work depends on
+> users *existing*, not on users being *manageable*, and the 1.16 seeded agents
+> supply that.
+>
+> The cost is the one named under 4.4–4.5 either way: one-time passwords in the
+> admin UI, or Gmail send pulled forward. Deferring does not change that
+> decision, it only postpones it.
+
 | # | Task | Size |
 |---|---|---|
 | 4.1 | Admin CRUD: create user, assign role, edit, deactivate | M |
@@ -292,8 +303,8 @@ acting-user seam no longer exists.
 
 | # | Task | Size |
 |---|---|---|
-| 5.1 | `Job` queue worker: `FOR UPDATE SKIP LOCKED`, retries, backoff, dead-letter | M |
-| 5.2 | Anthropic client wrapper: retries, timeouts, error taxonomy | M |
+| 5.1 | `Job` queue worker: `FOR UPDATE SKIP LOCKED`, retries, backoff, dead-letter — ✅ landed early, ahead of Phase 4 | M |
+| 5.2 | Anthropic client wrapper: retries, timeouts, error taxonomy — ✅ landed early | M |
 | 5.3 | **Knowledge base**: model, admin CRUD, markdown editor | L |
 | 5.4 | **Measure total KB tokens** (`messages.countTokens`) | S |
 | 5.5 | Prompt assembly: system → KB → ticket body, cache breakpoint after the KB | M |
@@ -304,6 +315,19 @@ acting-user seam no longer exists.
 > 5.4 is a branch point: under ~200k tokens the whole KB ships in the cached
 > prompt and there is no retrieval layer; above it, add `pgvector` and chunking,
 > which is a material addition to this phase.
+>
+> **5.1, 5.2 and 5.9 shipped ahead of Phase 4** — the summaries were prioritised
+> directly after Phase 3. What that bought is the foundation the rest of this
+> phase and all of Phase 6 stand on: a drained job queue and one place where
+> Anthropic failures are classified as retry-or-give-up.
+>
+> What it deliberately left alone: there is no knowledge base, so there is
+> nothing cacheable and **no cache breakpoint yet** — 5.5 and 5.6 are still
+> open, and the summarize prompt is already ordered stable-first so adding one
+> does not reshuffle the prefix. The classifier (5.7) is not built, so
+> `classificationState` is still `PENDING` on every ticket. And summaries are
+> triggered by hand: nothing enqueues one automatically, because nothing creates
+> tickets until Phase 6.
 
 ### 5b · Classification & summaries
 
@@ -311,7 +335,7 @@ acting-user seam no longer exists.
 |---|---|---|
 | 5.7 | Classifier job: structured output, category enum + confidence, `effort: low` | M |
 | 5.8 | `classification_state = failed` never blocks the agent | S |
-| 5.9 | Summarization job, `effort: low` | M |
+| 5.9 | Summarization job, `effort: low` — ✅ landed early, with an on-demand trigger | M |
 | 5.10 | Store agent category corrections as labeled eval data | M |
 
 ### 5c · Suggested replies
@@ -459,13 +483,19 @@ P.5 retention policy ───────────────────�
                   at 3.13)
 ```
 
-Strictly serial. No phase waits on infrastructure, DNS, or a third-party
-provisioning step — polling removed all three, and there is nothing to deploy.
+Serial, with one exception taken. No phase waits on infrastructure, DNS, or a
+third-party provisioning step — polling removed all three, and there is nothing
+to deploy.
 
-**Phase 4 is the one genuinely movable block.** Ticket work depends on users
-existing, not on users being *manageable*, which is why it sits here. It could
-move later still, or run in parallel with Phase 5 if a second person is
-available.
+**Phase 4 is the one genuinely movable block, and it has been moved.** Ticket
+work depends on users existing, not on users being *manageable*, which is why it
+sat here. After Phase 3, tasks 5.1, 5.2 and 5.9 were built instead, and Phase 4
+now runs after them. The seeded agents from 1.16 are what make that safe: every
+author, assignee, and audit actor still resolves to a real user.
+
+The order that must **not** be revisited is Phases 2 and 3 — see below. Moving
+Phase 4 costs nothing; moving auth costs a longer window in which a writable
+unauthenticated CRM holds customer data.
 
 **Phases 2 and 3 are the one pair that must not be reordered again.** Auth was
 already moved after ticket work once; the acting-user seam is what pays for that,

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "dev": "pnpm -r --parallel dev",
+    "dev": "pnpm -r --parallel run \"/^dev(:worker)?$/\"",
     "dev:worker": "pnpm --filter @support/server dev:worker",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",

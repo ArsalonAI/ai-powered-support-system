@@ -21,15 +21,42 @@ network are the Gmail API and the Anthropic API.
 
 ## Status
 
-**Phases 1 and 2 complete. [Phase 3 — Authentication](docs/implementation-plan.md#phase-3--authentication)
-is in progress** — sessions, login, and route protection have landed. Sign in
-with a seeded account, work the queue, and every reply and audit entry is
-attributed to the account that made it.
+**Phases 1, 2 and 3 complete.** Sign in with a seeded account, work the queue,
+and every reply and audit entry is attributed to the account that made it.
 
-Run `pnpm dev:worker` in a second terminal for the worker's housekeeping. It
-must stay at exactly one process. It does **not** touch ticket status — the
-timed auto-resolve and auto-close sweeps were cut, so nothing moves a ticket
-without a person.
+**AI summaries have landed, ahead of their place in the plan.**
+[Phase 4 — User management](docs/implementation-plan.md#phase-4--user-management)
+is deferred and the first slice of
+[Phase 5](docs/implementation-plan.md#phase-5--ai-features) was pulled forward
+instead: the job queue (5.1), the Anthropic client wrapper (5.2), and the
+summarization job (5.9). Open a ticket and press **Summarize** — the worker
+reads the thread and writes a paragraph telling you what the ticket is about
+and what is outstanding.
+
+Phase 4 is the plan's own "one genuinely movable block", which is what made
+this reorder cheap. Nothing else from Phase 5 is built: no knowledge base, no
+classifier, no drafts. See the notes in the implementation plan.
+
+**`pnpm dev` now starts all three processes** — API, SPA, and worker. It used to
+ask for the worker in a second terminal, which both specs said it shouldn't, and
+which made the AI features quietly off whenever someone forgot. The worker
+**needs `ANTHROPIC_API_KEY` to start**, because a worker running without one is a
+queue that silently fills up.
+
+There is still exactly one worker, but that is now **enforced by a Postgres
+advisory lock** rather than by remembering: a second one exits immediately
+saying another holds the lock. That is what makes auto-start safe — the job
+queue tolerates concurrent drains, but the Gmail poller in Phase 6 does not, and
+two of those double-create tickets with no error. `pnpm dev:worker` still runs
+it on its own.
+
+The worker still does **not** touch ticket status: the timed auto-resolve and
+auto-close sweeps were cut, so nothing moves a ticket without a person.
+Summarizing is not a status change.
+
+A summary never gets in the way. A ticket with no summary, one still being
+written, or one whose job failed is worked exactly the same way — the thread it
+summarizes is on the same page.
 
 **The API is no longer open.** Every route except `/api/health` requires a
 session; the acting-user seam that stood in for one during Phase 2 has been
@@ -73,6 +100,11 @@ phase:
 - **Ticket, user, and stats read endpoints** landed ahead of their phases so the
   seeded corpus is explorable. They cover parts of 7.1/7.2/7.4; the dashboard UI
   is outstanding.
+- **Summaries are triggered by hand only.** Nothing enqueues one automatically,
+  because until Phase 6 nothing creates tickets either. Auto-summarizing on a
+  new inbound message belongs with the Gmail work.
+- **The Anthropic call is logged, not traced.** Model, effort, tokens and
+  latency go to the worker's log; OpenTelemetry spans are task 5.16.
 
 ## Repository layout
 
@@ -94,8 +126,13 @@ cp apps/server/.env.example apps/server/.env               # ships with SESSION_
 openssl rand -base64 48                                    # → SESSION_SECRET; the API exits at boot without one
 pnpm db:migrate                                            # apply migrations
 pnpm db:seed                                               # bootstrap admin, agents, ticket fixtures
-pnpm dev                                                   # server on :3000, client on :5173
+pnpm dev                                                   # api :3000, client :5173, and the worker
 ```
+
+`ANTHROPIC_API_KEY` is only read by the worker, and it refuses to start without
+one. The API and the SPA come up regardless — the queue accepts summarize jobs,
+nothing drains them, and the button spins. The test suite never has a key and
+never calls the API.
 
 The SPA proxies `/api/*` to the API, so the browser only ever sees one origin —
 that is what keeps session cookies `SameSite=Lax` with no CORS. Do not replace
