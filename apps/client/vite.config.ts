@@ -31,5 +31,21 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov', 'json-summary'],
+      reportsDirectory: './coverage',
+      // See the note in apps/server/vitest.config.ts — without `all`, an
+      // untested component is absent from the report rather than 0%.
+      all: true,
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        '**/*.test.{ts,tsx}',
+        // Mounts the app into the DOM; nothing to assert that rendering a route
+        // in a test does not already cover.
+        'src/main.tsx',
+        'src/**/*.d.ts',
+      ],
+    },
   },
 });

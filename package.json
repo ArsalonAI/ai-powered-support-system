@@ -17,6 +17,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
+    "test:coverage": "pnpm -r test:coverage",
+    "coverage:open": "open apps/server/coverage/index.html apps/client/coverage/index.html packages/shared/coverage/index.html",
     "db:migrate": "pnpm --filter @support/server db:migrate",
     "db:reset": "pnpm --filter @support/server db:reset",
     "db:seed": "pnpm --filter @support/server db:seed",
