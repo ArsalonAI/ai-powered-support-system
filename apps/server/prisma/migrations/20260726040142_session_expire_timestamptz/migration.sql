@@ -1,0 +1,17 @@
+-- `session.expire` is the one column in this database with two writers.
+--
+-- `connect-pg-simple` writes it as `to_timestamp($epoch)`, which produces a
+-- value with a zone; every other timestamp here is written and read by Prisma
+-- alone, which is consistently UTC in both directions. Casting a zoned value
+-- into a naive `timestamp` column stores local wall-clock time, and Prisma then
+-- reads it back as though it were UTC — so the row sits the machine's UTC
+-- offset away from the truth, and `expire > now()` silently answers wrong.
+--
+-- The session store itself never noticed: it compares against `to_timestamp()`
+-- too, so it was consistently wrong with itself. What it broke is task 3.6 —
+-- listing a user's live sessions returned none of them, which is the query
+-- revocation depends on.
+--
+-- The conversion below reads the existing naive values as local time, which is
+-- what they were written as, so live sessions survive the change.
+ALTER TABLE "session" ALTER COLUMN "expire" SET DATA TYPE TIMESTAMPTZ(6);
