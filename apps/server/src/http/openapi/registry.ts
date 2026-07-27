@@ -281,6 +281,20 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post',
+  path: '/tickets/{number}/summarize',
+  tags: ['Tickets'],
+  summary: 'Queue an AI summary of the thread',
+  description:
+    'Queues a job for the worker; it does not write the summary. Poll `summaryState` on the ticket to follow it: PENDING → RUNNING → READY, or FAILED if the job exhausted its attempts. A summary never gates the agent — a FAILED or missing one leaves the ticket fully workable. Calling this again while a job is already in flight is a no-op.',
+  request: { params: numberParam, headers: csrfHeader },
+  responses: {
+    202: json('The ticket, with the summary now queued', TicketDetail),
+    ...writeResponses,
+  },
+});
+
+registry.registerPath({
   method: 'patch',
   path: '/tickets/{number}/category',
   tags: ['Tickets'],

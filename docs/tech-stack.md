@@ -38,8 +38,15 @@ should not restart a poll cycle mid-flight.
 
 The worker must stay at one process. The job queue is concurrency-safe via
 `FOR UPDATE SKIP LOCKED`, but the Gmail polling loop is not — two pollers racing
-on the same `historyId` will double-create tickets. Locally that means: don't
-run a second `pnpm dev` in another terminal.
+on the same `historyId` will double-create tickets.
+
+**That is enforced by a Postgres advisory lock, not by instructions.** The
+worker takes the lock at boot on a dedicated connection and exits if another
+holds it, so a second `pnpm dev` is a no-op rather than a corruption. The lock
+releases when the connection drops, so a killed worker never locks out its
+replacement. This is deliberately the same principle as the CHECK constraints in
+the migration: an invariant that fails silently when enforced only by convention
+belongs in the database.
 
 ## Frontend
 

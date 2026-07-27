@@ -92,8 +92,21 @@ export const relatedTicketSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+/**
+ * Where the AI summary has got to.
+ *
+ * Derived from the newest summarize job rather than stored: a column would be a
+ * second copy of the job's own status, and the two would eventually disagree.
+ * `FAILED` means the job dead-lettered — the ticket is still fully workable,
+ * because classification and summarization never gate the agent.
+ */
+export const summaryStateSchema = z.enum(['NONE', 'PENDING', 'RUNNING', 'READY', 'FAILED']);
+export type SummaryState = z.infer<typeof summaryStateSchema>;
+
 export const ticketDetailSchema = ticketSummarySchema.extend({
   summary: z.string().nullable(),
+  summaryGeneratedAt: z.string().datetime().nullable(),
+  summaryState: summaryStateSchema,
   aiCategory: z.enum(['TECHNICAL_QUESTION', 'REFUND_REQUEST', 'GENERAL_QUESTION']).nullable(),
   aiCategoryConfidence: z.number().nullable(),
   gmailThreadId: z.string().nullable(),

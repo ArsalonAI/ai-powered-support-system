@@ -11,6 +11,7 @@ import {
   useResolve,
   useSetAssignee,
   useSetCategory,
+  useSummarize,
   useTicket,
 } from '../features/tickets/queries';
 
@@ -65,6 +66,65 @@ function Thread({ ticket }: { ticket: TicketDetail }) {
         );
       })}
     </ol>
+  );
+}
+
+/**
+ * The AI summary (task 5.9).
+ *
+ * Written by the worker, not by this request, so the states are the job's:
+ * queue it, watch it, read it. It is never a gate — a ticket with no summary,
+ * or a failed one, is worked exactly the same way, and the thread it summarizes
+ * is directly below.
+ */
+function Summary({ ticket }: { ticket: TicketDetail }) {
+  const summarize = useSummarize(ticket.number);
+  const working =
+    ticket.summaryState === 'PENDING' || ticket.summaryState === 'RUNNING' || summarize.isPending;
+
+  const action = (
+    <button
+      type="button"
+      disabled={working}
+      onClick={() => summarize.mutate(undefined)}
+      className="shrink-0 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-white disabled:opacity-40"
+    >
+      {working ? 'Summarizing…' : ticket.summary ? 'Regenerate' : 'Summarize'}
+    </button>
+  );
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Summary</h2>
+          {ticket.summary ? (
+            <p className="mt-2 text-slate-700">{ticket.summary}</p>
+          ) : (
+            <p className="mt-2 text-slate-500">
+              {working
+                ? 'Claude is reading the thread…'
+                : 'No summary yet — read the thread, or have Claude summarize it.'}
+            </p>
+          )}
+          {ticket.summaryState === 'FAILED' && (
+            <p className="mt-2 text-xs text-amber-800">
+              The last attempt failed. The ticket is unaffected — try again, or just read the
+              thread.
+            </p>
+          )}
+          {ticket.summary && ticket.summaryGeneratedAt && !working && (
+            <p className="mt-2 text-xs text-slate-400">
+              Written by Claude · {formatDate(ticket.summaryGeneratedAt)}
+            </p>
+          )}
+        </div>
+        {action}
+      </div>
+      {summarize.isError && (
+        <p className="mt-2 text-sm text-red-700">{errorMessage(summarize.error)}</p>
+      )}
+    </section>
   );
 }
 
@@ -333,12 +393,7 @@ export function TicketDetailPage() {
 
       <div className="flex gap-6">
         <div className="flex min-w-0 flex-1 flex-col gap-5">
-          {ticket.summary && (
-            <p className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              <span className="font-medium">Summary · </span>
-              {ticket.summary}
-            </p>
-          )}
+          <Summary ticket={ticket} />
           <Thread ticket={ticket} />
           <Composer ticket={ticket} />
         </div>

@@ -1,5 +1,6 @@
-import type { Prisma } from '@prisma/client';
+import type { JobStatus, Prisma } from '@prisma/client';
 import type {
+  SummaryState,
   TicketDetail,
   TicketListQuery,
   TicketListResponse,
@@ -123,12 +124,45 @@ export async function listTickets(rawQuery: unknown): Promise<TicketListResponse
   };
 }
 
+/**
+ * Where the summary has got to, from the newest summarize job plus whether text
+ * has actually landed.
+ *
+ * The job's status is the source of truth while one is in flight; once it has
+ * succeeded, the presence of the text is. That ordering matters for the
+ * re-summarize case: a ticket that already has a summary and a newly queued job
+ * reads `PENDING`, not `READY`, so the UI shows work in progress rather than
+ * stale text with no indication anything is happening.
+ */
+function toSummaryState(latestJob: JobStatus | undefined, hasSummary: boolean): SummaryState {
+  switch (latestJob) {
+    case 'PENDING':
+      return 'PENDING';
+    case 'RUNNING':
+      return 'RUNNING';
+    case 'FAILED':
+    case 'DEAD':
+      // A retry lands back on PENDING, so anything still marked failed here has
+      // exhausted its attempts. Surfaced, never blocking.
+      return 'FAILED';
+    default:
+      return hasSummary ? 'READY' : 'NONE';
+  }
+}
+
 export async function getTicketByNumber(number: number): Promise<TicketDetail | null> {
   const ticket = await prisma.ticket.findUnique({
     where: { number },
     select: {
       ...ticketSummarySelect,
       summary: true,
+      summaryGeneratedAt: true,
+      jobs: {
+        where: { type: 'SUMMARIZE_TICKET' },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { status: true },
+      },
       aiCategory: true,
       aiCategoryConfidence: true,
       gmailThreadId: true,
@@ -182,6 +216,8 @@ export async function getTicketByNumber(number: number): Promise<TicketDetail | 
   return {
     ...toSummary(ticket),
     summary: ticket.summary,
+    summaryGeneratedAt: ticket.summaryGeneratedAt?.toISOString() ?? null,
+    summaryState: toSummaryState(ticket.jobs[0]?.status, ticket.summary !== null),
     aiCategory: ticket.aiCategory,
     aiCategoryConfidence: ticket.aiCategoryConfidence,
     gmailThreadId: ticket.gmailThreadId,

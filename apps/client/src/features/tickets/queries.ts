@@ -44,11 +44,24 @@ export function useTickets(query: TicketQuery) {
   });
 }
 
+/** How often to re-check a ticket whose summary is still being written. */
+const SUMMARY_POLL_MS = 2_000;
+
 export function useTicket(number: number | undefined) {
   return useQuery({
     queryKey: ['ticket', number],
     queryFn: ({ signal }) => apiFetch<TicketDetail>(`/tickets/${number}`, { signal }),
     enabled: number !== undefined,
+    /**
+     * The summary is written by the worker, in another process — so unlike
+     * every other write here, the result cannot arrive in a mutation response.
+     * Poll while a job is in flight and stop as soon as it settles, rather than
+     * polling this endpoint all the time.
+     */
+    refetchInterval: (query) => {
+      const state = query.state.data?.summaryState;
+      return state === 'PENDING' || state === 'RUNNING' ? SUMMARY_POLL_MS : false;
+    },
   });
 }
 
@@ -101,3 +114,8 @@ export const useSetAssignee = (number: number) =>
   useTicketMutation<{ assigneeId: string | null }>(number, 'assignee', 'PATCH');
 export const useSetCategory = (number: number) =>
   useTicketMutation<{ category: string }>(number, 'category', 'PATCH');
+/**
+ * Queues the summary; the worker writes it. The 202 response carries the ticket
+ * with `summaryState` already PENDING, which is what starts `useTicket` polling.
+ */
+export const useSummarize = (number: number) => useTicketMutation<never>(number, 'summarize');

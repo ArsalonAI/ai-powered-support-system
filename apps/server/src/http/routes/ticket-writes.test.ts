@@ -64,6 +64,7 @@ beforeAll(async () => {
 
 /** Order matters: audit actors and message authors are ON DELETE RESTRICT. */
 async function truncateTicketData() {
+  await prisma.job.deleteMany();
   await prisma.auditEvent.deleteMany();
   await prisma.message.deleteMany();
   await prisma.ticket.deleteMany();
@@ -315,5 +316,106 @@ describe('PATCH /api/tickets/:number/category', () => {
     });
 
     expect(response.status).toBe(422);
+  });
+});
+
+/**
+ * The route only *queues* the summary — the worker writes it. So what these
+ * assert is the queueing: that one job lands, that a second click does not
+ * stack another on top, and that the response tells the client to start
+ * watching.
+ */
+describe('POST /api/tickets/:number/summarize', () => {
+  const summarizeJobs = (ticketId: string) =>
+    prisma.job.findMany({ where: { ticketId, type: 'SUMMARIZE_TICKET' } });
+
+  it('queues a job and reports the ticket as pending', async () => {
+    const ticket = await makeTicket();
+
+    const response = await write(asAlex, 'post', `/api/tickets/${ticket.number}/summarize`);
+
+    // 202, not 201: nothing has been written to the ticket yet.
+    expect(response.status).toBe(202);
+    expect(response.body.summaryState).toBe('PENDING');
+    expect(response.body.summary).toBeNull();
+
+    const jobs = await summarizeJobs(ticket.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ status: 'PENDING', type: 'SUMMARIZE_TICKET' });
+  });
+
+  // A double-click is not two intents.
+  it('does not stack a second job while one is in flight', async () => {
+    const ticket = await makeTicket();
+
+    await write(asAlex, 'post', `/api/tickets/${ticket.number}/summarize`);
+    const second = await write(asAlex, 'post', `/api/tickets/${ticket.number}/summarize`);
+
+    expect(second.status).toBe(202);
+    expect(await summarizeJobs(ticket.id)).toHaveLength(1);
+  });
+
+  /**
+   * Re-summarizing a grown thread is the normal case, and it is why the route
+   * de-duplicates on an in-flight query rather than on the `dedupeKey` column —
+   * that key is unique forever, so it would make the first summary the only one
+   * this ticket could ever have.
+   */
+  it('queues again once the previous job has finished', async () => {
+    const ticket = await makeTicket();
+
+    await write(asAlex, 'post', `/api/tickets/${ticket.number}/summarize`);
+    const [first] = await summarizeJobs(ticket.id);
+    await prisma.job.update({
+      where: { id: first!.id },
+      data: { status: 'SUCCEEDED', finishedAt: new Date() },
+    });
+
+    await write(asAlex, 'post', `/api/tickets/${ticket.number}/summarize`);
+
+    expect(await summarizeJobs(ticket.id)).toHaveLength(2);
+  });
+
+  it('surfaces a dead-lettered job as FAILED without touching the ticket', async () => {
+    const ticket = await makeTicket();
+    await write(asAlex, 'post', `/api/tickets/${ticket.number}/summarize`);
+    const [job] = await summarizeJobs(ticket.id);
+    await prisma.job.update({
+      where: { id: job!.id },
+      data: { status: 'DEAD', lastError: 'bad api key', finishedAt: new Date() },
+    });
+
+    const response = await asAlex.agent.get(`/api/tickets/${ticket.number}`);
+
+    expect(response.body.summaryState).toBe('FAILED');
+    // Classification and summarization never gate the agent: the ticket is
+    // exactly as workable as it was before.
+    expect(response.body.status).toBe('OPEN');
+    expect(response.body.summary).toBeNull();
+  });
+
+  it('404s on a ticket that does not exist, and queues nothing', async () => {
+    const response = await write(asAlex, 'post', '/api/tickets/999999/summarize');
+
+    expect(response.status).toBe(404);
+    expect(await prisma.job.count()).toBe(0);
+  });
+
+  it('rejects an unauthenticated caller', async () => {
+    const ticket = await makeTicket();
+
+    const response = await request(app).post(`/api/tickets/${ticket.number}/summarize`);
+
+    expect(response.status).toBe(401);
+    expect(await prisma.job.count()).toBe(0);
+  });
+
+  it('rejects a request with no CSRF token', async () => {
+    const ticket = await makeTicket();
+
+    const response = await asAlex.agent.post(`/api/tickets/${ticket.number}/summarize`);
+
+    expect(response.status).toBe(403);
+    expect(await prisma.job.count()).toBe(0);
   });
 });

@@ -9,6 +9,7 @@ import type { Request } from 'express';
 import { Router } from 'express';
 import { z } from 'zod';
 import { currentUser } from '../../auth/current-user.js';
+import { enqueueJob, hasJobInFlight } from '../../jobs/job-queue.js';
 import { getTicketByNumber, listTickets } from '../../tickets/ticket-service.js';
 import {
   appendOutboundMessage,
@@ -111,6 +112,36 @@ ticketsRouter.patch('/tickets/:number/assignee', async (req, res) => {
   const body = parseBody(assigneeRequestSchema, req);
   await setAssignee({ ref: { number }, actor: actorFor(req), assigneeId: body.assigneeId });
   res.json(await getTicketByNumber(number));
+});
+
+/**
+ * Queue a summary (task 5.9). The *worker* writes it — this route only asks.
+ *
+ * 202, not 201: nothing has been created on the ticket yet, and the client
+ * polls `summaryState` until the worker gets there. Answering 200 with an
+ * unchanged ticket would read as "done".
+ *
+ * Re-summarizing is allowed and expected — a thread that has grown since the
+ * last summary deserves a new one. What is not allowed is stacking a second job
+ * on top of one already in flight, which is a double-click, not an intent.
+ */
+ticketsRouter.post('/tickets/:number/summarize', async (req, res) => {
+  const { number } = parseParams(ticketNumberParams, req);
+
+  const ticket = await getTicketByNumber(number);
+  if (!ticket) {
+    throw ApiError.notFound(`No ticket with number ${number}`);
+  }
+
+  // Deliberately a query rather than the `dedupeKey` column: that key is unique
+  // forever, so using it here would make the first summary the only one this
+  // ticket could ever have. It belongs to Gmail ingest (task 6.5).
+  if (!(await hasJobInFlight('SUMMARIZE_TICKET', ticket.id))) {
+    await enqueueJob({ type: 'SUMMARIZE_TICKET', ticketId: ticket.id });
+  }
+
+  // Re-read, so the response carries the state the enqueue just produced.
+  res.status(202).json(await getTicketByNumber(number));
 });
 
 ticketsRouter.patch('/tickets/:number/category', async (req, res) => {
