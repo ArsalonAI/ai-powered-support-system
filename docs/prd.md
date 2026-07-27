@@ -63,10 +63,10 @@ documents it drew on.
 
 The agent reads the draft, edits or discards it, and sends. The ticket flips to
 `waiting_on = customer` and drops out of the default view without anyone
-resolving it. If the customer replies, it comes back. If they don't, it
-auto-resolves after 7 days. The agent only resolves tickets manually when they
-know the conversation is genuinely finished. Claiming a ticket is optional and
-signals "I'm on this" — it never blocks anyone else.
+resolving it. If the customer replies, it comes back. If they don't, it stays
+open and waiting on them until an agent decides otherwise — nothing resolves or
+closes a ticket on a timer. Claiming a ticket is optional and signals "I'm on
+this" — it never blocks anyone else.
 
 ## Customers
 
@@ -157,15 +157,16 @@ oldest first.
    inbound email
         │
         ▼
-   ┌─────────┐   agent/admin resolves    ┌──────────┐   14 days    ┌────────┐
-   │  open   │ ───────────────────────►  │ resolved │ ───────────► │ closed │
-   │         │   (or 7d customer         │          │  no reply    │        │
-   │         │    silence)               │          │              │        │
-   └─────────┘ ◄───────────────────────  └──────────┘              └────────┘
-        ▲          customer replies                                     │
-        │                                                               │
-        └───────── new ticket, cross-linked ◄──── customer replies ─────┘
+   ┌─────────┐   agent/admin resolves    ┌──────────┐  agent/admin  ┌────────┐
+   │  open   │ ───────────────────────►  │ resolved │ ────────────► │ closed │
+   │         │                           │          │    closes     │        │
+   └─────────┘ ◄───────────────────────  └──────────┘               └────────┘
+        ▲          customer replies                                      │
+        │                                                                │
+        └───────── new ticket, cross-linked ◄──── customer replies ──────┘
 ```
+
+Every arrow out of `open` and `resolved` is a person. There is no timed edge.
 
 Rules:
 
@@ -184,11 +185,13 @@ Rules:
 - **A customer reply** lands on the existing ticket via Gmail `threadId`. It
   sets `waiting_on = us` and, if the ticket was `resolved`, returns it to
   `open`.
-- **Auto-resolve.** An `open` ticket with `waiting_on = customer` and no reply
-  for 7 days moves to `resolved`.
-- **Auto-close.** A `resolved` ticket with no reply for 14 days moves to
-  `closed`. This is the only path into `closed`; agents can also close manually
-  for spam or duplicates.
+- **No timed transitions.** Nothing moves a ticket to `resolved` or `closed` on
+  a schedule. Both are reached only by an agent deciding so. A queue that tidies
+  itself reports a smaller backlog than the one that exists, and the ticket it
+  tidied away is the one nobody got to — age is a reason to look at a ticket,
+  not to close it. The consequence, accepted knowingly: nothing bounds how long
+  a ticket sits in `open` or `resolved`, so the queue view and the ageing
+  columns are what surface neglect.
 - **`closed` is terminal.** A reply to a closed thread opens a *new* ticket,
   cross-linked to the original so the history stays traversable. Terminal means
   no new activity, not deleted — nothing is ever hard deleted.
@@ -225,8 +228,8 @@ Definitions that matter for measurement:
 - **Business hours** are configurable; overnight and weekend arrivals do not
   accrue against first-response time. Auto-send was removed, so nothing responds
   outside staffed hours by design.
-- **First response** counts only human outbound messages. A ticket that
-  auto-resolves without a reply has no first-response time.
+- **First response** counts only human outbound messages. A ticket that is
+  closed without a reply has no first-response time.
 - Acceptance rate is derived from the per-message AI-drafted/edited flags
   described under Users & Roles. It cannot be reconstructed after the fact, so
   those flags ship with the first draft feature.

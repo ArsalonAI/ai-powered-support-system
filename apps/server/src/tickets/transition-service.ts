@@ -16,9 +16,11 @@ import { ApiError } from '../http/api-error.js';
  */
 
 /**
- * Who is acting. `SYSTEM` is the timed sweeps and nothing else — the database
- * CHECK constraint pairs this with `actorId`, so a user action without an id
- * (or a system action carrying one) is rejected by Postgres, not just by us.
+ * Who is acting. `SYSTEM` is for the paths with no person behind them — email
+ * ingest (Phase 6) is the remaining one, now that the timed sweeps are gone.
+ * The database CHECK constraint pairs this with `actorId`, so a user action
+ * without an id (or a system action carrying one) is rejected by Postgres, not
+ * just by us.
  */
 export type Actor = { type: 'USER'; userId: string } | { type: 'SYSTEM' };
 
@@ -485,59 +487,19 @@ export async function setTicketCategory(params: {
 }
 
 // ---------------------------------------------------------------------------
-// Timed sweeps (2.9)
+// Timed sweeps — removed
 // ---------------------------------------------------------------------------
-
-export const AUTO_RESOLVE_AFTER_DAYS = 7;
-export const AUTO_CLOSE_AFTER_DAYS = 14;
-
-function daysBefore(now: Date, days: number): Date {
-  return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-}
-
-/**
- * Plain functions the scheduler calls, rather than logic living inside the
- * scheduler — which is what lets 2.16 test the seven- and fourteen-day
- * boundaries without waiting for them.
- *
- * Each ticket transitions through the same path a human would, so the audit log
- * records the sweep as a `SYSTEM` actor rather than as an unexplained change.
- */
-export async function sweepAutoResolve(now: Date = new Date()): Promise<string[]> {
-  const cutoff = daysBefore(now, AUTO_RESOLVE_AFTER_DAYS);
-
-  const due = await prisma.ticket.findMany({
-    where: {
-      status: 'OPEN',
-      waitingOn: 'CUSTOMER',
-      lastOutboundAt: { lte: cutoff },
-    },
-    select: { id: true },
-  });
-
-  const resolved: string[] = [];
-  for (const { id } of due) {
-    await resolveTicket({ ref: { id }, actor: { type: 'SYSTEM' }, now });
-    resolved.push(id);
-  }
-  return resolved;
-}
-
-export async function sweepAutoClose(now: Date = new Date()): Promise<string[]> {
-  const cutoff = daysBefore(now, AUTO_CLOSE_AFTER_DAYS);
-
-  const due = await prisma.ticket.findMany({
-    where: {
-      status: 'RESOLVED',
-      resolvedAt: { lte: cutoff },
-    },
-    select: { id: true },
-  });
-
-  const closed: string[] = [];
-  for (const { id } of due) {
-    await closeTicket({ ref: { id }, actor: { type: 'SYSTEM' }, reason: 'auto_close', now });
-    closed.push(id);
-  }
-  return closed;
-}
+//
+// There were two, from the original task 2.9: a 7-day auto-resolve and a 14-day
+// auto-close. Both are gone, deliberately, and the specs were amended rather
+// than left describing them.
+//
+// **No ticket changes status without a person deciding it should.** A queue
+// that tidies itself reports a backlog smaller than the one that exists, and
+// the ticket it tidied away is exactly the one nobody got to. The `SYSTEM`
+// actor still exists on `Actor` because email ingest (Phase 6) legitimately
+// acts without a user; nothing in the ticket lifecycle uses it now.
+//
+// The consequence to keep in view: `RESOLVED` and `CLOSED` are now only ever
+// reached by hand, so nothing bounds how long a ticket sits in either. `CLOSED`
+// remains terminal and reachable only through `closeTicket`.

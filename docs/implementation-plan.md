@@ -28,8 +28,8 @@ tickets, and email is connected last. Two consequences to plan around:
 
 **Nothing here is blocked on infrastructure.** The whole system, email included,
 runs against a local Postgres and a real Gmail mailbox. Attachments go to the
-local disk (1.18, 6.7) and the timed sweeps run on a plain interval in the
-worker (2.9) — neither is a stand-in for something else that arrives later.
+local disk (1.18, 6.7) and the worker's housekeeping runs on a plain interval —
+neither is a stand-in for something else that arrives later.
 
 The only external dependencies in the entire plan are the Gmail API and the
 Anthropic API, and only Phases 5 and 6 touch them.
@@ -148,7 +148,7 @@ login in the way.
 | 2.6 | Message thread append (author, direction, timestamps) | M |
 | 2.7 | Optional assignment: claim / unclaim, non-restrictive | S |
 | 2.8 | Manual category set/override | S |
-| 2.9 | Scheduled sweeps: 7-day auto-resolve, 14-day auto-close | M |
+| 2.9 | ~~Scheduled sweeps: 7-day auto-resolve, 14-day auto-close~~ — **cut**, see below | — |
 | 2.10 | Audit events on every transition | M |
 
 > **2.1 exists because the database will not accept the alternative.**
@@ -193,13 +193,21 @@ login in the way.
 > prove nothing.
 >
 > 2.16 covers the single most test-worthy unit in the system. The lifecycle has
-> reopen paths, a terminal state, two timed sweeps, and cross-linking — the kind
-> of logic that stays correct only if illegal transitions are asserted against,
-> not just legal ones.
+> reopen paths, a terminal state, and cross-linking — the kind of logic that
+> stays correct only if illegal transitions are asserted against, not just legal
+> ones.
 >
-> Sweeps (2.9) run on a plain interval in the worker. Keep the sweep logic in a
-> function the scheduler calls rather than in the scheduler itself, so 2.16 can
-> test it without waiting seven days.
+> **2.9 was built and then cut.** The 7-day auto-resolve and 14-day auto-close
+> shipped, ran, and were removed during Phase 3. A queue that tidies itself
+> reports a smaller backlog than the one that exists, and the ticket it tidied
+> away is the one nobody got to. Every transition is now a person's, and the
+> `transition-service` tests assert that no sweep can reappear without the
+> assertion failing.
+>
+> What that gives up is a bound on how long a ticket can sit in `open` or
+> `resolved`. Nothing collects that debt now — the queue view and ageing are
+> what surface it. If the team later wants a limit, the thing to reach for is a
+> *report* of stale tickets, not a transition that hides them.
 
 **Exit criteria:** with no login, an agent can open the app, work the seeded
 queue, and triage, reply to, and resolve a ticket end to end — with the reply and
