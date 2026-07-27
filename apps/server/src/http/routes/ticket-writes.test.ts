@@ -2,23 +2,40 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { seedAgents } from '../../../prisma/seeds/users.js';
 import { createApp } from '../../app.js';
-import { ACTING_USER_HEADER } from '../../auth/acting-user.js';
 import { disconnectPrisma, prisma } from '../../db/prisma.js';
+import {
+  clearLoginAttempts,
+  clearSessions,
+  CSRF_HEADER,
+  signIn,
+  type SignedIn,
+} from '../../test/session.js';
 
 /**
  * The write endpoints over HTTP. The state machine itself is covered in
  * `transition-service.test.ts`; what these assert is the wiring — that the
- * routes reach the transition service, that the acting-user seam attributes
- * writes to a real user, and that failures surface as the documented status
- * codes rather than as a 500.
+ * routes reach the transition service, that the write is attributed to the
+ * signed-in user, and that failures surface as the documented status codes
+ * rather than as a 500.
+ *
+ * Every request here carries a session. Task 3.10 put the whole ticket router
+ * behind `requireAuth`, which is also why the last test in the reply block
+ * exists: an unauthenticated write must not reach the database at all.
  */
 
 const app = createApp();
 
 let alex: { id: string; name: string };
 let maria: { id: string; name: string };
+let asAlex: SignedIn;
+let asMaria: SignedIn;
 let customerId: string;
 let seq = 0;
+
+/** A state-changing request as a given user, with that session's CSRF token. */
+function write(session: SignedIn, method: 'post' | 'patch', path: string) {
+  return session.agent[method](path).set(CSRF_HEADER, session.csrfToken);
+}
 
 async function makeTicket(overrides: { status?: 'OPEN' | 'RESOLVED' | 'CLOSED' } = {}) {
   seq += 1;
@@ -35,10 +52,14 @@ beforeAll(async () => {
   await seedAgents(prisma);
   const users = await prisma.user.findMany({
     orderBy: { name: 'asc' },
-    select: { id: true, name: true },
+    select: { id: true, name: true, email: true },
   });
   alex = users[0]!;
   maria = users[1]!;
+
+  await clearLoginAttempts();
+  asAlex = await signIn(app, users[0]!.email);
+  asMaria = await signIn(app, users[1]!.email);
 }, 60_000);
 
 /** Order matters: audit actors and message authors are ON DELETE RESTRICT. */
@@ -61,6 +82,8 @@ beforeEach(async () => {
 afterAll(async () => {
   // Leave the database as we found it — see the note in transition-service.test.ts.
   await truncateTicketData();
+  await clearSessions();
+  await clearLoginAttempts();
   await disconnectPrisma();
 });
 
@@ -68,9 +91,10 @@ describe('POST /api/tickets/:number/reply', () => {
   it('persists the reply and hands the ticket back to the customer', async () => {
     const ticket = await makeTicket();
 
-    const response = await request(app)
-      .post(`/api/tickets/${ticket.number}/reply`)
-      .send({ bodyText: 'We are looking into it.', aiDrafted: false });
+    const response = await write(asAlex, 'post', `/api/tickets/${ticket.number}/reply`).send({
+      bodyText: 'We are looking into it.',
+      aiDrafted: false,
+    });
 
     expect(response.status).toBe(201);
     expect(response.body.waitingOn).toBe('CUSTOMER');
@@ -82,59 +106,80 @@ describe('POST /api/tickets/:number/reply', () => {
     });
   });
 
-  // The seam has to write a real user id — the CHECK constraint on outbound
-  // authors is the whole reason it exists.
-  it('attributes the reply to the user named in the acting-user header', async () => {
+  // A real user id has to reach the database — the CHECK constraint on outbound
+  // authors is what makes "the AI never sends" enforceable rather than a policy.
+  it('attributes the reply to the signed-in user', async () => {
     const ticket = await makeTicket();
 
-    const response = await request(app)
-      .post(`/api/tickets/${ticket.number}/reply`)
-      .set(ACTING_USER_HEADER, maria.id)
-      .send({ bodyText: 'Maria here.', aiDrafted: false });
+    const response = await write(asMaria, 'post', `/api/tickets/${ticket.number}/reply`).send({
+      bodyText: 'Maria here.',
+      aiDrafted: false,
+    });
 
     expect(response.status).toBe(201);
     expect(response.body.messages[0].author).toMatchObject({ id: maria.id, name: maria.name });
   });
 
-  it('falls back to the first agent by name when the header is absent', async () => {
+  it('two agents replying are recorded as two different authors', async () => {
     const ticket = await makeTicket();
 
-    const response = await request(app)
-      .post(`/api/tickets/${ticket.number}/reply`)
-      .send({ bodyText: 'No header set.', aiDrafted: false });
+    await write(asAlex, 'post', `/api/tickets/${ticket.number}/reply`).send({
+      bodyText: 'Alex first.',
+      aiDrafted: false,
+    });
+    const second = await write(asMaria, 'post', `/api/tickets/${ticket.number}/reply`).send({
+      bodyText: 'Maria second.',
+      aiDrafted: false,
+    });
 
-    expect(response.body.messages[0].author.id).toBe(alex.id);
+    expect(second.body.messages.map((m: { author: { id: string } }) => m.author.id)).toEqual([
+      alex.id,
+      maria.id,
+    ]);
   });
 
-  // Silently attributing a reply to the wrong person is exactly what the author
-  // column exists to prevent, so an unknown id is loud.
-  it('rejects an unknown acting user rather than falling back', async () => {
+  // Task 3.10. Before Phase 3 this route was writable by anyone who could reach
+  // it; the point of the wrapping in app.ts is that it no longer is.
+  it('rejects an unauthenticated write without touching the database', async () => {
     const ticket = await makeTicket();
 
     const response = await request(app)
       .post(`/api/tickets/${ticket.number}/reply`)
-      .set(ACTING_USER_HEADER, '00000000-0000-0000-0000-000000000000')
       .send({ bodyText: 'Who am I?', aiDrafted: false });
 
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('BAD_REQUEST');
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('UNAUTHENTICATED');
+    expect(await prisma.message.count()).toBe(0);
+  });
+
+  // Task 3.9. A session cookie alone is not authorization to write: the browser
+  // attaches it to requests another site caused too.
+  it('rejects a write from a valid session with no CSRF token', async () => {
+    const ticket = await makeTicket();
+
+    const response = await asAlex.agent
+      .post(`/api/tickets/${ticket.number}/reply`)
+      .send({ bodyText: 'No token.', aiDrafted: false });
+
+    expect(response.status).toBe(403);
     expect(await prisma.message.count()).toBe(0);
   });
 
   it('rejects an empty reply', async () => {
     const ticket = await makeTicket();
-    const response = await request(app)
-      .post(`/api/tickets/${ticket.number}/reply`)
-      .send({ bodyText: '', aiDrafted: false });
+    const response = await write(asAlex, 'post', `/api/tickets/${ticket.number}/reply`).send({
+      bodyText: '',
+      aiDrafted: false,
+    });
 
     expect(response.status).toBe(422);
   });
 
   it('rejects a reply that does not say whether it began as a draft', async () => {
     const ticket = await makeTicket();
-    const response = await request(app)
-      .post(`/api/tickets/${ticket.number}/reply`)
-      .send({ bodyText: 'Silent on the flags.' });
+    const response = await write(asAlex, 'post', `/api/tickets/${ticket.number}/reply`).send({
+      bodyText: 'Silent on the flags.',
+    });
 
     expect(response.status).toBe(422);
     expect(response.body.error.issues.map((i: { path: string }) => i.path)).toContain('aiDrafted');
@@ -142,9 +187,10 @@ describe('POST /api/tickets/:number/reply', () => {
 
   it('rejects aiDrafted without the edited flag', async () => {
     const ticket = await makeTicket();
-    const response = await request(app)
-      .post(`/api/tickets/${ticket.number}/reply`)
-      .send({ bodyText: 'Used the draft.', aiDrafted: true });
+    const response = await write(asAlex, 'post', `/api/tickets/${ticket.number}/reply`).send({
+      bodyText: 'Used the draft.',
+      aiDrafted: true,
+    });
 
     expect(response.status).toBe(422);
     expect(response.body.error.issues.map((i: { path: string }) => i.path)).toContain(
@@ -154,18 +200,20 @@ describe('POST /api/tickets/:number/reply', () => {
 
   it('409s on a closed ticket', async () => {
     const ticket = await makeTicket({ status: 'CLOSED' });
-    const response = await request(app)
-      .post(`/api/tickets/${ticket.number}/reply`)
-      .send({ bodyText: 'Anyone there?', aiDrafted: false });
+    const response = await write(asAlex, 'post', `/api/tickets/${ticket.number}/reply`).send({
+      bodyText: 'Anyone there?',
+      aiDrafted: false,
+    });
 
     expect(response.status).toBe(409);
     expect(response.body.error.code).toBe('ILLEGAL_TRANSITION');
   });
 
   it('404s on an unknown ticket', async () => {
-    const response = await request(app)
-      .post('/api/tickets/999999/reply')
-      .send({ bodyText: 'Hello?', aiDrafted: false });
+    const response = await write(asAlex, 'post', '/api/tickets/999999/reply').send({
+      bodyText: 'Hello?',
+      aiDrafted: false,
+    });
 
     expect(response.status).toBe(404);
   });
@@ -175,13 +223,13 @@ describe('resolve, close, and reopen', () => {
   it('walks a ticket open → resolved → closed', async () => {
     const ticket = await makeTicket();
 
-    const resolved = await request(app).post(`/api/tickets/${ticket.number}/resolve`).send();
+    const resolved = await write(asAlex, 'post', `/api/tickets/${ticket.number}/resolve`).send();
     expect(resolved.status).toBe(200);
     expect(resolved.body.status).toBe('RESOLVED');
 
-    const closed = await request(app)
-      .post(`/api/tickets/${ticket.number}/close`)
-      .send({ reason: 'duplicate' });
+    const closed = await write(asAlex, 'post', `/api/tickets/${ticket.number}/close`).send({
+      reason: 'duplicate',
+    });
     expect(closed.status).toBe(200);
     expect(closed.body.status).toBe('CLOSED');
   });
@@ -189,7 +237,7 @@ describe('resolve, close, and reopen', () => {
   it('reopens a resolved ticket back into the queue', async () => {
     const ticket = await makeTicket({ status: 'RESOLVED' });
 
-    const response = await request(app).post(`/api/tickets/${ticket.number}/reopen`).send();
+    const response = await write(asAlex, 'post', `/api/tickets/${ticket.number}/reopen`).send();
 
     expect(response.status).toBe(200);
     expect(response.body.status).toBe('OPEN');
@@ -198,17 +246,14 @@ describe('resolve, close, and reopen', () => {
 
   it('409s when reopening a closed ticket', async () => {
     const ticket = await makeTicket({ status: 'CLOSED' });
-    const response = await request(app).post(`/api/tickets/${ticket.number}/reopen`).send();
+    const response = await write(asAlex, 'post', `/api/tickets/${ticket.number}/reopen`).send();
 
     expect(response.status).toBe(409);
   });
 
   it('records every transition in the audit log with a named actor', async () => {
     const ticket = await makeTicket();
-    await request(app)
-      .post(`/api/tickets/${ticket.number}/resolve`)
-      .set(ACTING_USER_HEADER, maria.id)
-      .send();
+    await write(asMaria, 'post', `/api/tickets/${ticket.number}/resolve`).send();
 
     const events = await prisma.auditEvent.findMany({ where: { ticketId: ticket.id } });
     expect(events).toHaveLength(1);
@@ -224,23 +269,23 @@ describe('PATCH /api/tickets/:number/assignee', () => {
   it('claims and unclaims', async () => {
     const ticket = await makeTicket();
 
-    const claimed = await request(app)
-      .patch(`/api/tickets/${ticket.number}/assignee`)
-      .send({ assigneeId: maria.id });
+    const claimed = await write(asAlex, 'patch', `/api/tickets/${ticket.number}/assignee`).send({
+      assigneeId: maria.id,
+    });
     expect(claimed.status).toBe(200);
     expect(claimed.body.assignee).toMatchObject({ id: maria.id });
 
-    const unclaimed = await request(app)
-      .patch(`/api/tickets/${ticket.number}/assignee`)
-      .send({ assigneeId: null });
+    const unclaimed = await write(asAlex, 'patch', `/api/tickets/${ticket.number}/assignee`).send({
+      assigneeId: null,
+    });
     expect(unclaimed.body.assignee).toBeNull();
   });
 
   it('422s on a malformed assignee id', async () => {
     const ticket = await makeTicket();
-    const response = await request(app)
-      .patch(`/api/tickets/${ticket.number}/assignee`)
-      .send({ assigneeId: 'not-a-uuid' });
+    const response = await write(asAlex, 'patch', `/api/tickets/${ticket.number}/assignee`).send({
+      assigneeId: 'not-a-uuid',
+    });
 
     expect(response.status).toBe(422);
   });
@@ -254,9 +299,9 @@ describe('PATCH /api/tickets/:number/category', () => {
       data: { aiCategory: 'GENERAL_QUESTION', category: 'GENERAL_QUESTION' },
     });
 
-    const response = await request(app)
-      .patch(`/api/tickets/${ticket.number}/category`)
-      .send({ category: 'REFUND_REQUEST' });
+    const response = await write(asAlex, 'patch', `/api/tickets/${ticket.number}/category`).send({
+      category: 'REFUND_REQUEST',
+    });
 
     expect(response.status).toBe(200);
     expect(response.body.category).toBe('REFUND_REQUEST');
@@ -265,9 +310,9 @@ describe('PATCH /api/tickets/:number/category', () => {
 
   it('422s on a category outside the enum', async () => {
     const ticket = await makeTicket();
-    const response = await request(app)
-      .patch(`/api/tickets/${ticket.number}/category`)
-      .send({ category: 'BILLING' });
+    const response = await write(asAlex, 'patch', `/api/tickets/${ticket.number}/category`).send({
+      category: 'BILLING',
+    });
 
     expect(response.status).toBe(422);
   });

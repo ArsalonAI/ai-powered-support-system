@@ -2,10 +2,9 @@ import type { TicketStatus } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { seedAgents } from '../../prisma/seeds/users.js';
 import { disconnectPrisma, prisma } from '../db/prisma.js';
+import { sweepLoginAttempts } from '../auth/login-rate-limit.js';
 import {
   appendOutboundMessage,
-  AUTO_CLOSE_AFTER_DAYS,
-  AUTO_RESOLVE_AFTER_DAYS,
   closeTicket,
   isLegalTransition,
   LEGAL_TRANSITIONS,
@@ -14,15 +13,13 @@ import {
   resolveTicket,
   setAssignee,
   setTicketCategory,
-  sweepAutoClose,
-  sweepAutoResolve,
   type Actor,
 } from './transition-service.js';
 
 /**
- * The lifecycle has reopen paths, a terminal state, two timed sweeps, and
- * cross-linking — logic that stays correct only if the *illegal* transitions
- * are asserted against, not just the legal ones.
+ * The lifecycle has reopen paths, a terminal state, and cross-linking — logic
+ * that stays correct only if the *illegal* transitions are asserted against,
+ * not just the legal ones.
  *
  * These tests run against real Postgres deliberately. Several of the rules they
  * cover are enforced by CHECK constraints in the migration, so a mock would
@@ -517,79 +514,43 @@ describe('category override', () => {
   });
 });
 
-describe('the timed sweeps', () => {
+/**
+ * There used to be two timed sweeps here — a 7-day auto-resolve and a 14-day
+ * auto-close. They were removed, and these tests exist so they cannot come back
+ * by accident.
+ *
+ * The reason is that a queue which tidies itself reports a backlog smaller than
+ * the one that exists, and the ticket it tidied away is precisely the one
+ * nobody got to. Age is a reason to look at a ticket, not to close it.
+ */
+describe('no ticket changes status on its own', () => {
   const now = new Date('2026-06-01T00:00:00Z');
   const daysAgo = (days: number) => new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-  it(`auto-resolves after ${AUTO_RESOLVE_AFTER_DAYS} days of customer silence`, async () => {
-    const due = await makeTicket({
-      waitingOn: 'CUSTOMER',
-      lastOutboundAt: daysAgo(AUTO_RESOLVE_AFTER_DAYS + 1),
-    });
+  it('leaves a long-untouched ticket exactly where a human left it', async () => {
+    const stale = await makeTicket({ waitingOn: 'CUSTOMER', lastOutboundAt: daysAgo(365) });
+    const resolvedLongAgo = await makeTicket({ status: 'RESOLVED', resolvedAt: daysAgo(365) });
 
-    expect(await sweepAutoResolve(now)).toEqual([due.id]);
+    // Everything the worker still runs on a tick. Under the old sweeps both of
+    // these tickets moved; now nothing does.
+    await sweepLoginAttempts(now);
 
-    const swept = await prisma.ticket.findUniqueOrThrow({ where: { id: due.id } });
-    expect(swept.status).toBe('RESOLVED');
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: stale.id } })).status).toBe(
+      'OPEN',
+    );
+    expect(
+      (await prisma.ticket.findUniqueOrThrow({ where: { id: resolvedLongAgo.id } })).status,
+    ).toBe('RESOLVED');
+    // Nothing to explain in the audit log, because nothing happened.
+    expect(await auditFor(stale.id)).toHaveLength(0);
   });
 
-  it('leaves a ticket one day short of the boundary alone', async () => {
-    await makeTicket({
-      waitingOn: 'CUSTOMER',
-      lastOutboundAt: daysAgo(AUTO_RESOLVE_AFTER_DAYS - 1),
-    });
+  it('exports no sweep that transitions a ticket', async () => {
+    // A named guard against reintroduction: the module surface is the thing a
+    // scheduler would have to reach for.
+    const service: Record<string, unknown> = await import('./transition-service.js');
 
-    expect(await sweepAutoResolve(now)).toEqual([]);
-  });
-
-  // The queue signal, not the status, decides: a ticket waiting on *us* is
-  // someone's to answer no matter how long it has sat there.
-  it('never auto-resolves a ticket that is waiting on us', async () => {
-    await makeTicket({ waitingOn: 'US', lastOutboundAt: daysAgo(90) });
-
-    expect(await sweepAutoResolve(now)).toEqual([]);
-  });
-
-  it('records the sweep as SYSTEM, not as an unexplained change', async () => {
-    const due = await makeTicket({
-      waitingOn: 'CUSTOMER',
-      lastOutboundAt: daysAgo(AUTO_RESOLVE_AFTER_DAYS + 1),
-    });
-    await sweepAutoResolve(now);
-
-    const audit = await auditFor(due.id);
-    expect(audit[0]).toMatchObject({
-      action: 'ticket.resolved',
-      actorType: 'SYSTEM',
-      actorId: null,
-    });
-  });
-
-  it(`auto-closes after ${AUTO_CLOSE_AFTER_DAYS} days resolved`, async () => {
-    const due = await makeTicket({
-      status: 'RESOLVED',
-      resolvedAt: daysAgo(AUTO_CLOSE_AFTER_DAYS + 1),
-    });
-
-    expect(await sweepAutoClose(now)).toEqual([due.id]);
-    const swept = await prisma.ticket.findUniqueOrThrow({ where: { id: due.id } });
-    expect(swept.status).toBe('CLOSED');
-    expect(swept.closedAt).toEqual(now);
-  });
-
-  it('leaves a recently resolved ticket alone', async () => {
-    await makeTicket({ status: 'RESOLVED', resolvedAt: daysAgo(AUTO_CLOSE_AFTER_DAYS - 1) });
-    expect(await sweepAutoClose(now)).toEqual([]);
-  });
-
-  it('is idempotent — a second pass finds nothing', async () => {
-    await makeTicket({
-      waitingOn: 'CUSTOMER',
-      lastOutboundAt: daysAgo(AUTO_RESOLVE_AFTER_DAYS + 1),
-    });
-
-    expect(await sweepAutoResolve(now)).toHaveLength(1);
-    expect(await sweepAutoResolve(now)).toHaveLength(0);
+    expect(Object.keys(service).filter((name) => /sweep|auto/i.test(name))).toEqual([]);
   });
 });
 

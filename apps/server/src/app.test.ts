@@ -30,11 +30,21 @@ describe('GET /api/health', () => {
 
 describe('error handling', () => {
   it('returns the standard error body for an unknown route', async () => {
-    const response = await request(app).get('/api/does-not-exist');
+    const response = await request(app).get('/does-not-exist');
 
     expect(response.status).toBe(404);
     expect(response.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Route not found' });
     expect(response.body.error.requestId).toBeTypeOf('string');
+  });
+
+  // Task 3.10 puts `requireAuth` ahead of the not-found handler for `/api/*`,
+  // so an unauthenticated caller cannot tell an unknown route from one they are
+  // simply not allowed to reach. That is deliberate — see app.ts.
+  it('answers 401, not 404, for an unknown API route without a session', async () => {
+    const response = await request(app).get('/api/does-not-exist');
+
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('UNAUTHENTICATED');
   });
 
   it('rejects a malformed JSON body without leaking a stack trace', async () => {

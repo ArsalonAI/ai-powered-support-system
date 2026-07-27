@@ -1,14 +1,15 @@
 import { createApp } from './app.js';
-import { assertActingUserSeamAllowed } from './auth/acting-user.js';
+import { closeSessionPool } from './auth/session.js';
 import { env } from './config/env.js';
 import { disconnectPrisma } from './db/prisma.js';
+import { assertDevDashboardAllowed } from './http/routes/dev.js';
 import { logger } from './observability/logger.js';
 import { storage } from './storage/index.js';
 
-// Task 2.1's seam attributes writes to a seeded agent because there is no login
-// until Phase 3. It is a development stand-in and must never boot in production,
-// so this fails startup rather than waiting for the first reply to be sent.
-assertActingUserSeamAllowed();
+// The developer dashboard serves seeded credentials. Like the storage driver
+// below, it is checked at boot so a production build fails to start rather than
+// exposing them the first time someone opens the page.
+assertDevDashboardAllowed();
 
 // Construct the storage driver at boot rather than on first use. A driver that
 // cannot be configured must crash at startup, not on the first inbound email
@@ -24,7 +25,11 @@ const server = app.listen(env.PORT, () => {
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'shutting down');
   server.close(() => {
-    void disconnectPrisma().finally(() => process.exit(0));
+    // The session store keeps its own pg pool alongside Prisma's — see
+    // `auth/session.ts`. Both have to go, or the process never exits.
+    void Promise.allSettled([disconnectPrisma(), closeSessionPool()]).finally(() =>
+      process.exit(0),
+    );
   });
   // A hung in-flight request must not hold the process open indefinitely.
   setTimeout(() => process.exit(1), 10_000).unref();

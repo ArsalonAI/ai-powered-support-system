@@ -1,6 +1,8 @@
 import { OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi';
 import type { OpenAPIObject } from 'openapi3-ts/oas31';
-import { env } from '../../config/env.js';
+import { SEED_AGENT_PASSWORD } from '../../config/seed-credentials.js';
+import { env, isProduction } from '../../config/env.js';
+import { DEV_DASHBOARD_PATH } from '../routes/dev.js';
 import { registry } from './registry.js';
 
 /**
@@ -22,6 +24,27 @@ export function openApiDocument(): OpenAPIObject {
       description: [
         'Internal API for the email support CRM.',
         '',
+        '### Signing in',
+        '',
+        '**Every route except `/health` and `/auth/login` requires a session.** You are',
+        'already signed in if you can read this — these docs sit behind the same check.',
+        '',
+        'Session auth is a cookie, so "Try it out" works with no extra setup for reads.',
+        'For anything that changes state you also need the CSRF token: call',
+        '`GET /auth/me`, copy `csrfToken` from the response, and paste it into the',
+        '`x-csrf-token` field on the request. A missing or stale token is a 403, not a 401.',
+        '',
+        ...(isProduction
+          ? []
+          : [
+              '### Development',
+              '',
+              `- [**Developer dashboard**](/api${DEV_DASHBOARD_PATH}) — seeded accounts and their`,
+              '  passwords, test coverage, and links to everything else',
+              `- Seeded agents sign in with \`${SEED_AGENT_PASSWORD}\`; see [\`GET /users\`](/api/users)`,
+              '  for the addresses, or the dashboard above',
+              '',
+            ]),
         '### The app',
         '',
         '- [Ticket queue](/tickets) — the default agent view',
@@ -30,16 +53,12 @@ export function openApiDocument(): OpenAPIObject {
         '### This API',
         '',
         '- [Raw OpenAPI document](/api/openapi.json)',
-        '- [Health](/api/health)',
+        '- [Health](/api/health) — the one route that needs no session',
         '',
         'App links are relative, so they resolve only when these docs are opened through',
         'the SPA origin — **http://localhost:5173/api/docs**. Opened directly on the API',
         'port there is no SPA to link to. That is the same-origin rule the whole app is',
         'built on, not an oversight.',
-        '',
-        '**Phase 1 + early Phase 2 read endpoints.** Authentication lands in Phase 3,',
-        'after which every route except `/health` requires a session — these endpoints',
-        'are unauthenticated only because that phase has not shipped yet.',
         '',
         'This documentation UI is disabled in production.',
       ].join('\n'),

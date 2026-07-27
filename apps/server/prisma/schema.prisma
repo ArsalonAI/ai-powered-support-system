@@ -125,7 +125,14 @@ model User {
 model Session {
   sid    String   @id
   sess   Json
-  expire DateTime @db.Timestamp(6)
+  /// `timestamptz`, not `timestamp`, because this column has two writers.
+  /// `connect-pg-simple` writes it as `to_timestamp($epoch)` — a value with a
+  /// zone — while every other DateTime here is written and read by Prisma
+  /// alone and is consistently UTC either way. Into a naive column that cast
+  /// silently lands local wall-clock time, and Prisma then reads it back as
+  /// UTC: the row is off by the machine's offset, and `expire > now()` stops
+  /// meaning anything. Task 3.6's revocation query is exactly that comparison.
+  expire DateTime @db.Timestamptz(6)
 
   userId String?
   user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -233,7 +240,7 @@ model Ticket {
   nextTicket       Ticket? @relation("TicketContinuation")
 
   /// Metric timestamps. `firstResponseAt` counts only human outbound messages;
-  /// a ticket that auto-resolves without a reply has no first-response time.
+  /// a ticket closed without a reply has no first-response time.
   firstInboundAt      DateTime?
   firstResponseAt     DateTime?
   lastInboundAt       DateTime?
@@ -256,7 +263,9 @@ model Ticket {
   @@index([assigneeId, status])
   @@index([customerId, createdAt])
   @@index([gmailThreadId])
-  /// Drives the auto-resolve (7d) and auto-close (14d) sweeps.
+  /// Ageing views: how long a ticket has sat with the ball in someone's court.
+  /// These backed the timed sweeps before those were cut; they are kept because
+  /// surfacing a stale ticket is the thing that replaces closing it.
   @@index([status, waitingOn, lastOutboundAt])
   @@index([status, resolvedAt])
   @@map("tickets")

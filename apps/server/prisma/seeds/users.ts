@@ -1,6 +1,10 @@
 import type { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../../src/auth/password.js';
+import { SEED_AGENT_PASSWORD } from '../../src/config/seed-credentials.js';
 import { AGENT_ALEX, AGENT_MARIA, AGENT_SAM } from './ticket-fixtures.js';
+
+/** Kept in step with `PLACEHOLDER_SECRETS` in `src/config/env.ts`. */
+const PLACEHOLDER_PASSWORDS = new Set(['change-me-immediately']);
 
 /**
  * There is no self-service signup, so the first admin has to be seeded — a
@@ -19,6 +23,16 @@ export async function seedBootstrapAdmin(prisma: PrismaClient): Promise<void> {
   }
   if (password.length < 12) {
     throw new Error('BOOTSTRAP_ADMIN_PASSWORD must be at least 12 characters.');
+  }
+  // Checked here as well as in the env schema, because the seed reads
+  // `process.env` directly and does not go through it. A placeholder long
+  // enough to clear the length check would otherwise create a live ADMIN
+  // account whose password is published in this repository — and from Phase 3
+  // there is a login route to use it against.
+  if (PLACEHOLDER_PASSWORDS.has(password)) {
+    throw new Error(
+      'BOOTSTRAP_ADMIN_PASSWORD is still the .env.example placeholder. Choose a real password.',
+    );
   }
 
   const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
@@ -43,8 +57,12 @@ export async function seedBootstrapAdmin(prisma: PrismaClient): Promise<void> {
   console.log(`  created admin ${email} (must change password on first login)`);
 }
 
-/** Dev-only password for seeded agents. Never used outside development seeds. */
-export const SEED_AGENT_PASSWORD = 'dev-password-change-me';
+/**
+ * Dev-only password for seeded agents. Defined in `src/config/` and re-exported
+ * here so existing callers keep working — `src/` cannot import from `prisma/`
+ * without breaking `pnpm build`, which compiles `src/` alone.
+ */
+export { SEED_AGENT_PASSWORD };
 
 const AGENTS = [
   { email: AGENT_ALEX, name: 'Alex Chen', role: 'AGENT' as const },

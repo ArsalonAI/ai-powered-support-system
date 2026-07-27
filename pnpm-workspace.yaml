@@ -12,6 +12,9 @@ catalog:
   prisma: ^6.19.3
   typescript: ^5.9.3
   vitest: ^3.2.7
+  # Must track `vitest` exactly — the coverage provider is versioned in lockstep
+  # with the runner and a mismatched pair fails at collection, not at install.
+  '@vitest/coverage-v8': ^3.2.7
   zod: ^3.24.1
 
 # Postinstall build scripts we explicitly trust. Prisma's engines and esbuild's

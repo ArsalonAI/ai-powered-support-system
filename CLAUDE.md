@@ -66,8 +66,9 @@ which is gitignored. If either fails with `TS2307: Cannot find module
 ## Architecture
 
 **Two processes against one Postgres**, both started by `pnpm dev`. `api` serves
-`/api/*`. `worker` polls Gmail, drains the job queue, and runs the timed sweeps,
-and must stay at **exactly one process** — the job queue is concurrency-safe via
+`/api/*`. `worker` polls Gmail, drains the job queue, and runs housekeeping —
+**never ticket status**, since the timed sweeps were cut — and must stay at
+**exactly one process** — the job queue is concurrency-safe via
 `FOR UPDATE SKIP LOCKED`, but two Gmail pollers racing on the same `historyId`
 double-create tickets.
 
@@ -124,6 +125,11 @@ scripts, and a `psql` session all bypass it — and because each of these fails
   cross-linked to the original. This is why `gmailThreadId` is indexed but
   **not unique**: reply mapping resolves to the newest non-closed ticket for a
   thread.
+- **No ticket changes status without a person.** The 7-day auto-resolve and
+  14-day auto-close were built and then cut — a queue that tidies itself
+  under-reports its backlog, and the ticket it tidied away is the one nobody got
+  to. Do not reintroduce a timed transition; a stale-ticket *report* is the
+  thing to build instead. The transition-service tests fail if a sweep returns.
 - **`waiting_on` is the triage signal**, not the status. The default queue view
   is `status = OPEN AND waitingOn = US`, oldest first.
 - **Classification never gates the agent.** `PENDING` or `FAILED` leaves the

@@ -49,7 +49,7 @@ export interface TicketFixture {
   assigneeEmail?: string;
   summary?: string;
   flaggedForResearch?: boolean;
-  /** Days before the seed run; also used for the auto-close sweep. */
+  /** Days before the seed run. */
   resolvedDaysAgo?: number;
   closedDaysAgo?: number;
   gmailThreadId?: string;
@@ -404,8 +404,8 @@ Rowan`,
     aiCategoryConfidence: 0.86,
     expectedCategory: 'GENERAL_QUESTION',
     assigneeEmail: AGENT_MARIA,
-    // Silent for over 7 days with the ball in the customer's court: the
-    // auto-resolve sweep should pick this up.
+    // Silent for over a week with the ball in the customer's court. Nothing
+    // moves it any more — it is here so the ageing view has something in it.
     summary: 'Vendor security review; customer asked for the SOC 2 Type II report and a DPA.',
     gmailThreadId: 'thread-00000a',
     messages: [
@@ -448,7 +448,7 @@ Maria`,
     categoryCorrectedFrom: 'GENERAL_QUESTION',
     expectedCategory: 'REFUND_REQUEST',
     assigneeEmail: AGENT_ALEX,
-    // Resolved more than 14 days ago: the auto-close sweep should pick this up.
+    // Resolved a fortnight ago and still resolved: closing is a person's call.
     resolvedDaysAgo: 16,
     summary:
       'Customer filed a chargeback with their bank, then wrote in wanting to withdraw it and settle directly. Agent explained the process and refunded.',

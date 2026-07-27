@@ -28,8 +28,9 @@ Two Node processes against one Postgres, started together by `pnpm dev`:
 
 - **`api`** — Express. Serves `/api/*`.
 - **`worker`** — polls Gmail for new mail, processes queued AI jobs (classify,
-  summarize, draft), and runs the auto-resolve (7-day) and auto-close (14-day)
-  sweeps on a plain interval. **Exactly one process.**
+  summarize, draft), and runs housekeeping on a plain interval. **Exactly one
+  process.** It does not touch ticket status: the timed auto-resolve and
+  auto-close sweeps were removed, and nothing moves a ticket without a person.
 
 They are split because their failure modes and lifetimes differ: a crash in the
 Gmail poller should not take down the API, and restarting the API on a file save

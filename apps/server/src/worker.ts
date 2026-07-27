@@ -1,30 +1,31 @@
+import { sweepLoginAttempts } from './auth/login-rate-limit.js';
 import { disconnectPrisma } from './db/prisma.js';
 import { logger } from './observability/logger.js';
-import { sweepAutoClose, sweepAutoResolve } from './tickets/transition-service.js';
 
 /**
  * The worker process. Started separately from the API (`pnpm dev:worker`), and
  * there must be **exactly one** of it.
  *
- * Today it runs the timed sweeps. Phase 5 adds the job-queue drain, which is
- * concurrency-safe via `FOR UPDATE SKIP LOCKED`, and Phase 6 adds the Gmail
- * poller, which is *not* — two pollers racing on the same `historyId`
- * double-create tickets. Starting a second worker is the mistake that silently
- * corrupts data, which is why this is a deliberate second command rather than
- * something `pnpm dev` fans out.
+ * Phase 5 adds the job-queue drain, which is concurrency-safe via
+ * `FOR UPDATE SKIP LOCKED`, and Phase 6 adds the Gmail poller, which is *not* —
+ * two pollers racing on the same `historyId` double-create tickets. Starting a
+ * second worker is the mistake that silently corrupts data, which is why this is
+ * a deliberate second command rather than something `pnpm dev` fans out.
  *
- * The sweep logic itself lives in the transition service, not here: a scheduler
- * that owns business rules cannot be tested without waiting for its schedule.
+ * **It no longer touches tickets.** The 7-day auto-resolve and 14-day auto-close
+ * were removed: no ticket changes status without a person deciding it should.
+ * What is left is housekeeping over the rate limiter's own rows, which is why
+ * this process still exists today rather than waiting for Phase 5.
  */
 
-/** Seven- and fourteen-day thresholds do not need a tight loop. */
+/** Nothing here is time-critical; the rows being dropped are already an hour stale. */
 const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
 let running = false;
 
 async function runSweeps(): Promise<void> {
-  // The sweeps are idempotent, but overlapping runs would still do redundant
-  // work if one ever ran long against a large backlog.
+  // Idempotent, but overlapping runs would still do redundant work if one ever
+  // ran long against a large backlog.
   if (running) {
     logger.warn('sweep still running, skipping this tick');
     return;
@@ -32,18 +33,18 @@ async function runSweeps(): Promise<void> {
   running = true;
 
   try {
-    const now = new Date();
-    const resolved = await sweepAutoResolve(now);
-    const closed = await sweepAutoClose(now);
+    // Login attempts past the rate limiter's window are read by nothing; the
+    // table would otherwise grow forever on a row per sign-in attempt.
+    const attempts = await sweepLoginAttempts(new Date());
 
-    if (resolved.length > 0 || closed.length > 0) {
-      logger.info({ autoResolved: resolved.length, autoClosed: closed.length }, 'sweeps applied');
+    if (attempts > 0) {
+      logger.info({ loginAttempts: attempts }, 'sweeps applied');
     } else {
       logger.debug('sweeps found nothing due');
     }
   } catch (error) {
-    // A failed sweep must not kill the worker: the next tick retries, and the
-    // tickets it would have moved are still visible and workable meanwhile.
+    // A failed sweep must not kill the worker: the next tick retries, and
+    // nothing downstream depends on it having run.
     logger.error({ err: error }, 'sweep failed');
   } finally {
     running = false;

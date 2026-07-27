@@ -5,9 +5,10 @@ import {
   replyRequestSchema,
   ticketListQuerySchema,
 } from '@support/shared';
+import type { Request } from 'express';
 import { Router } from 'express';
 import { z } from 'zod';
-import { getActingUser } from '../../auth/acting-user.js';
+import { currentUser } from '../../auth/current-user.js';
 import { getTicketByNumber, listTickets } from '../../tickets/ticket-service.js';
 import {
   appendOutboundMessage,
@@ -32,8 +33,9 @@ import { parseBody, parseParams, parseQuery } from '../validate.js';
  * as a PATCH over ticket columns. There is deliberately no way to set `status`
  * directly, because that is the thing the state machine exists to govern.
  *
- * Phase 3 wraps this whole router in `requireAuth`; until then `getActingUser`
- * (task 2.1) supplies the identity every write needs.
+ * This whole router is mounted behind `requireAuth` in `app.ts`, so every
+ * handler here has an authenticated user — task 3.13 moved these call sites off
+ * the temporary 2.1 seam and onto the session, and this is where that landed.
  */
 export const ticketsRouter: Router = Router();
 
@@ -41,12 +43,9 @@ const ticketNumberParams = z.object({
   number: z.coerce.number().int().positive(),
 });
 
-/** Task 3.13 replaces this one line with the session user. */
-async function actorFor(
-  req: Parameters<typeof getActingUser>[0],
-): Promise<Extract<Actor, { type: 'USER' }>> {
-  const user = await getActingUser(req);
-  return { type: 'USER', userId: user.id };
+/** The logged-in user, in the shape the transition service records actors in. */
+function actorFor(req: Request): Extract<Actor, { type: 'USER' }> {
+  return { type: 'USER', userId: currentUser(req).id };
 }
 
 // --- Reads -----------------------------------------------------------------
@@ -72,7 +71,7 @@ ticketsRouter.get('/tickets/:number', async (req, res) => {
 ticketsRouter.post('/tickets/:number/reply', async (req, res) => {
   const { number } = parseParams(ticketNumberParams, req);
   const body = parseBody(replyRequestSchema, req);
-  const actor = await actorFor(req);
+  const actor = actorFor(req);
 
   await appendOutboundMessage({
     ref: { number },
@@ -90,33 +89,33 @@ ticketsRouter.post('/tickets/:number/reply', async (req, res) => {
 
 ticketsRouter.post('/tickets/:number/resolve', async (req, res) => {
   const { number } = parseParams(ticketNumberParams, req);
-  await resolveTicket({ ref: { number }, actor: await actorFor(req) });
+  await resolveTicket({ ref: { number }, actor: actorFor(req) });
   res.json(await getTicketByNumber(number));
 });
 
 ticketsRouter.post('/tickets/:number/close', async (req, res) => {
   const { number } = parseParams(ticketNumberParams, req);
   const body = parseBody(closeRequestSchema, req);
-  await closeTicket({ ref: { number }, actor: await actorFor(req), reason: body.reason });
+  await closeTicket({ ref: { number }, actor: actorFor(req), reason: body.reason });
   res.json(await getTicketByNumber(number));
 });
 
 ticketsRouter.post('/tickets/:number/reopen', async (req, res) => {
   const { number } = parseParams(ticketNumberParams, req);
-  await reopenTicket({ ref: { number }, actor: await actorFor(req) });
+  await reopenTicket({ ref: { number }, actor: actorFor(req) });
   res.json(await getTicketByNumber(number));
 });
 
 ticketsRouter.patch('/tickets/:number/assignee', async (req, res) => {
   const { number } = parseParams(ticketNumberParams, req);
   const body = parseBody(assigneeRequestSchema, req);
-  await setAssignee({ ref: { number }, actor: await actorFor(req), assigneeId: body.assigneeId });
+  await setAssignee({ ref: { number }, actor: actorFor(req), assigneeId: body.assigneeId });
   res.json(await getTicketByNumber(number));
 });
 
 ticketsRouter.patch('/tickets/:number/category', async (req, res) => {
   const { number } = parseParams(ticketNumberParams, req);
   const body = parseBody(categoryRequestSchema, req);
-  await setTicketCategory({ ref: { number }, actor: await actorFor(req), category: body.category });
+  await setTicketCategory({ ref: { number }, actor: actorFor(req), category: body.category });
   res.json(await getTicketByNumber(number));
 });

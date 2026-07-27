@@ -1,5 +1,5 @@
-import { apiErrorSchema, type ApiErrorCode, type FieldIssue } from '@support/shared';
-import { ACTING_USER_HEADER, getActingUserId } from './acting-user';
+import { apiErrorSchema, CSRF_HEADER, type ApiErrorCode, type FieldIssue } from '@support/shared';
+import { getCsrfToken } from './csrf';
 
 /**
  * Thrown for every non-2xx API response. Carries the server's error code so
@@ -40,17 +40,17 @@ export interface ApiRequestOptions {
 export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const { method = 'GET', body, signal } = options;
 
-  // Task 2.1's seam: until sessions exist there is no cookie identifying the
-  // agent, so writes carry the one chosen in the header switcher. Deleted at
-  // 3.13 along with `lib/acting-user.ts`.
-  const actingUserId = getActingUserId();
+  // The session cookie is `SameSite=Lax` and same-origin, so the browser
+  // attaches it on its own; the token is the part the server checks that a
+  // cross-site request could not have supplied.
+  const csrfToken = method === 'GET' ? null : getCsrfToken();
 
   const response = await fetch(`/api${path}`, {
     method,
     credentials: 'same-origin',
     headers: {
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      ...(actingUserId === null ? {} : { [ACTING_USER_HEADER]: actingUserId }),
+      ...(csrfToken === null ? {} : { [CSRF_HEADER]: csrfToken }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     ...(signal ? { signal } : {}),
